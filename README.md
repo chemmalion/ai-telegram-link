@@ -1,7 +1,7 @@
 # Telegram–ChatGPT Bot in Go
 
 ## Prerequisites
-- Go 1.21+
+- Go 1.24+
 - Telegram Bot Token
 - Base64-encoded 32-byte encryption key for `MASTER_KEY`
 
