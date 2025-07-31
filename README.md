@@ -34,7 +34,7 @@ Build and run:
 
 ```bash
 go mod tidy
-go build -o tgptbot
+go build -o tgptbot ./cmd/tgptbot
 ./tgptbot
 ```
 
