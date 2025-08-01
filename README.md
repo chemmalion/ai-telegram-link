@@ -28,6 +28,7 @@ Set environment variables:
 ```bash
 export BOT_TOKEN="123…"
 export MASTER_KEY="base64-32-bytes"
+export TBOT_ALLOWED_USER_IDS="12345,67890"
 ```
 
 2.
@@ -82,6 +83,7 @@ running on AWS EC2 you can pull them from AWS Secrets Manager:
 ```bash
 export BOT_TOKEN=$(aws secretsmanager get-secret-value --secret-id my-bot-token --query SecretString --output text)
 export MASTER_KEY=$(aws secretsmanager get-secret-value --secret-id my-master-key --query SecretString --output text)
+export TBOT_ALLOWED_USER_IDS=$(aws secretsmanager get-secret-value --secret-id my-allowed-users --query SecretString --output text)
 ```
 
 For local development you may still create a `.env` file from `env.example` and
@@ -90,7 +92,7 @@ manually provide the values.
 3. Run the container with a persistent data directory:
 
 ```bash
-docker run -e BOT_TOKEN -e MASTER_KEY -v $(pwd)/data:/data tgptbot
+docker run -e BOT_TOKEN -e MASTER_KEY -e TBOT_ALLOWED_USER_IDS -v $(pwd)/data:/data tgptbot
 ```
 
 Alternatively start it with Docker Compose, which will inherit the environment
@@ -108,11 +110,12 @@ When running on an EC2 instance the bot can read its credentials directly from
 AWS Secrets Manager instead of a local `.env` file. The helper script
 `start-compose.sh` retrieves the secrets and starts the container using
 Docker Compose. Set the secret names via the environment variables
-`BOT_TOKEN_SECRET_ID` and `MASTER_KEY_SECRET_ID` and execute the script:
+`BOT_TOKEN_SECRET_ID`, `MASTER_KEY_SECRET_ID` and `TBOT_ALLOWED_USER_IDS_SECRET_ID` and execute the script:
 
 ```bash
 export BOT_TOKEN_SECRET_ID="my-bot-token-secret"
 export MASTER_KEY_SECRET_ID="my-master-key-secret"
+export TBOT_ALLOWED_USER_IDS_SECRET_ID="my-allowed-users-secret"
 ./start-compose.sh
 ```
 

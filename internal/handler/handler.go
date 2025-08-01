@@ -4,6 +4,8 @@ import (
     "context"
     "fmt"
     "log"
+    "os"
+    "strconv"
     "strings"
 
     tg "github.com/go-telegram/bot"
@@ -14,7 +16,34 @@ import (
     "telegram-chatgpt-bot/internal/storage"
 )
 
-var pendingAuth = map[int64]string{}
+var (
+    pendingAuth  = map[int64]string{}
+    allowedUsers map[int64]bool
+)
+
+func init() {
+    parseAllowedUsers()
+}
+
+func parseAllowedUsers() {
+    idsEnv := os.Getenv("TBOT_ALLOWED_USER_IDS")
+    if idsEnv == "" {
+        return
+    }
+    allowedUsers = make(map[int64]bool)
+    for _, p := range strings.Split(idsEnv, ",") {
+        s := strings.TrimSpace(p)
+        if s == "" {
+            continue
+        }
+        id, err := strconv.ParseInt(s, 10, 64)
+        if err != nil {
+            log.Printf("invalid user id %q in TBOT_ALLOWED_USER_IDS", s)
+            continue
+        }
+        allowedUsers[id] = true
+    }
+}
 
 // HandleUpdate processes a Telegram update.
 func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
@@ -24,6 +53,13 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
     msg := upd.Message
     chatID := msg.Chat.ID
     topicID := msg.MessageThreadID
+
+    if len(allowedUsers) > 0 {
+        if msg.From == nil || !allowedUsers[msg.From.ID] {
+            b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "This bot is configured to work only with specific users in Telegram. But the bot source is open so that you can setup your own bot."})
+            return
+        }
+    }
 
     // Command handlers
     if cmd, args, ok := parseCommand(msg); ok {
