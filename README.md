@@ -66,3 +66,35 @@ go build -o tgptbot ./cmd/tgptbot
 
 5. Use `/unsettopic` to disable.
 
+## Docker
+
+A `Dockerfile` and `docker-compose.yml` are included for container-based deployment.
+
+1. Build the image:
+
+```bash
+docker build -t tgptbot .
+```
+
+2. Copy the sample environment file and edit the values:
+
+```bash
+cp env.example .env
+# update BOT_TOKEN and MASTER_KEY
+```
+
+3. Run the container with a persistent data directory:
+
+```bash
+docker run --env-file .env -v $(pwd)/data:/data tgptbot
+```
+
+Alternatively start it with Docker Compose:
+
+```bash
+docker-compose up -d
+```
+
+The Bolt database will be stored under `data/` on the host.
+
+
