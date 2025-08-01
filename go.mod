@@ -6,7 +6,7 @@ toolchain go1.24.3
 
 require (
 	github.com/boltdb/bolt v1.3.1
-	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
+	github.com/go-telegram/bot v1.16.0
 	github.com/sashabaranov/go-openai v1.8.0
 )
 
