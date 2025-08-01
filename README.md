@@ -68,7 +68,7 @@ go build -o tgptbot ./cmd/tgptbot
 
 ## Docker
 
-A `Dockerfile` and `docker-compose.yml` are included for container-based deployment.
+A `Dockerfile` and `docker-compose.yml` are included for container based deployment.
 
 1. Build the image:
 
@@ -76,20 +76,25 @@ A `Dockerfile` and `docker-compose.yml` are included for container-based deploym
 docker build -t tgptbot .
 ```
 
-2. (Optional) For local testing copy the sample environment file and edit the values:
+2. Set the required environment variables before starting the container. When
+running on AWS EC2 you can pull them from AWS Secrets Manager:
 
 ```bash
-cp env.example .env
-# update BOT_TOKEN and MASTER_KEY
+export BOT_TOKEN=$(aws secretsmanager get-secret-value --secret-id my-bot-token --query SecretString --output text)
+export MASTER_KEY=$(aws secretsmanager get-secret-value --secret-id my-master-key --query SecretString --output text)
 ```
+
+For local development you may still create a `.env` file from `env.example` and
+manually provide the values.
 
 3. Run the container with a persistent data directory:
 
 ```bash
-docker run --env-file .env -v $(pwd)/data:/data tgptbot
+docker run -e BOT_TOKEN -e MASTER_KEY -v $(pwd)/data:/data tgptbot
 ```
 
-Alternatively start it with Docker Compose:
+Alternatively start it with Docker Compose, which will inherit the environment
+variables set in your shell:
 
 ```bash
 docker-compose up -d
