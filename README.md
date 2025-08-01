@@ -1,5 +1,7 @@
 # Telegram–ChatGPT Bot in Go
 
+This tool is implemented using ChatGPT.
+
 ## Prerequisites
 - Go 1.24+
 - Telegram Bot Token
