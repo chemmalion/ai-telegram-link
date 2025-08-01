@@ -2,6 +2,8 @@ version: '3'
 services:
   bot:
     build: .
-    env_file: .env
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - MASTER_KEY=${MASTER_KEY}
     volumes:
       - ./data:/data

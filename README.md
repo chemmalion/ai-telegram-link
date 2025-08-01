@@ -76,7 +76,7 @@ A `Dockerfile` and `docker-compose.yml` are included for container-based deploym
 docker build -t tgptbot .
 ```
 
-2. Copy the sample environment file and edit the values:
+2. (Optional) For local testing copy the sample environment file and edit the values:
 
 ```bash
 cp env.example .env
@@ -96,5 +96,22 @@ docker-compose up -d
 ```
 
 The Bolt database will be stored under `data/` on the host.
+
+## Deployment with AWS Secrets Manager
+
+When running on an EC2 instance the bot can read its credentials directly from
+AWS Secrets Manager instead of a local `.env` file. The helper script
+`start-compose.sh` retrieves the secrets and starts the container using
+Docker Compose. Set the secret names via the environment variables
+`BOT_TOKEN_SECRET_ID` and `MASTER_KEY_SECRET_ID` and execute the script:
+
+```bash
+export BOT_TOKEN_SECRET_ID="my-bot-token-secret"
+export MASTER_KEY_SECRET_ID="my-master-key-secret"
+./start-compose.sh
+```
+
+The script requires `aws` CLI credentials to be available (for example via the
+instance's IAM role).
 
 
