@@ -6,8 +6,9 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"io"
-	"log"
 	"os"
+
+	"telegram-chatgpt-bot/internal/logging"
 )
 
 var aesGCM cipher.AEAD
@@ -16,19 +17,19 @@ var aesGCM cipher.AEAD
 func Init() {
 	keyB64 := os.Getenv("MASTER_KEY")
 	if keyB64 == "" {
-		log.Fatal("MASTER_KEY env var is required (base64-encoded 32 bytes)")
+		logging.Log.Fatal().Msg("MASTER_KEY env var is required (base64-encoded 32 bytes)")
 	}
 	key, err := base64.StdEncoding.DecodeString(keyB64)
 	if err != nil || len(key) != 32 {
-		log.Fatalf("invalid MASTER_KEY: %v", err)
+		logging.Log.Fatal().Err(err).Msg("invalid MASTER_KEY")
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		log.Fatal(err)
+		logging.Log.Fatal().Err(err).Msg("aes.NewCipher")
 	}
 	aesGCM, err = cipher.NewGCM(block)
 	if err != nil {
-		log.Fatal(err)
+		logging.Log.Fatal().Err(err).Msg("cipher.NewGCM")
 	}
 }
 
