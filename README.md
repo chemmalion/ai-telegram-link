@@ -29,6 +29,7 @@ Set environment variables:
 export BOT_TOKEN="123…"
 export MASTER_KEY="base64-32-bytes"
 export TBOT_ALLOWED_USER_IDS="12345,67890"
+export LOG_LEVEL="info" # optional: debug, info, warn, error
 ```
 
 2.

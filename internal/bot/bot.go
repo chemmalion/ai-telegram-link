@@ -1,45 +1,49 @@
 package bot
 
 import (
-    "context"
-    "log"
-    "os"
-    "os/signal"
+	"context"
+	"os"
+	"os/signal"
 
-    tg "github.com/go-telegram/bot"
+	tg "github.com/go-telegram/bot"
 
-    "telegram-chatgpt-bot/internal/crypt"
-    "telegram-chatgpt-bot/internal/handler"
-    "telegram-chatgpt-bot/internal/storage"
+	"telegram-chatgpt-bot/internal/crypt"
+	"telegram-chatgpt-bot/internal/handler"
+	"telegram-chatgpt-bot/internal/logging"
+	"telegram-chatgpt-bot/internal/storage"
 )
 
 // Run starts the Telegram bot and listens for updates.
 func Run() {
-    // initialize cipher & storage
-    crypt.Init()
-    if err := storage.Init("bot.db"); err != nil {
-        log.Fatal("storage init:", err)
-    }
+	logging.Init()
+	handler.Init()
+	logging.Log.Info().Msg("starting bot")
 
-    // create Telegram API client
-    botToken := os.Getenv("BOT_TOKEN")
-    if botToken == "" {
-        log.Fatal("BOT_TOKEN env var is required")
-    }
+	// initialize cipher & storage
+	crypt.Init()
+	if err := storage.Init("bot.db"); err != nil {
+		logging.Log.Fatal().Err(err).Msg("storage init")
+	}
 
-    b, err := tg.New(botToken, tg.WithDefaultHandler(handler.HandleUpdate))
-    if err != nil {
-        log.Fatal("failed to create bot:", err)
-    }
+	// create Telegram API client
+	botToken := os.Getenv("BOT_TOKEN")
+	if botToken == "" {
+		logging.Log.Fatal().Msg("BOT_TOKEN env var is required")
+	}
 
-    ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-    defer cancel()
+	b, err := tg.New(botToken, tg.WithDefaultHandler(handler.HandleUpdate))
+	if err != nil {
+		logging.Log.Fatal().Err(err).Msg("failed to create bot")
+	}
 
-    me, err := b.GetMe(ctx)
-    if err != nil {
-        log.Fatal("failed to get bot info:", err)
-    }
-    log.Printf("Bot started as @%s", me.Username)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
 
-    b.Start(ctx)
+	me, err := b.GetMe(ctx)
+	if err != nil {
+		logging.Log.Fatal().Err(err).Msg("failed to get bot info")
+	}
+	logging.Log.Info().Str("event", "bot_start").Str("username", me.Username).Msg("bot started")
+
+	b.Start(ctx)
 }
