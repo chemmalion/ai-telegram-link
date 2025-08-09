@@ -14,6 +14,7 @@ const (
 	bucketProjects = "projects"
 	bucketMapping  = "mapping" // key: chatID:topicID, value: projectName
 	bucketModels   = "models"  // key: projectName, value: model
+	bucketRules    = "rules"   // key: projectName, value: custom instruction
 )
 
 // Init opens the database file and creates buckets if needed.
@@ -31,6 +32,9 @@ func Init(path string) error {
 			return err
 		}
 		if _, err := tx.CreateBucketIfNotExists([]byte(bucketModels)); err != nil {
+			return err
+		}
+		if _, err := tx.CreateBucketIfNotExists([]byte(bucketRules)); err != nil {
 			return err
 		}
 		return nil
@@ -76,6 +80,29 @@ func LoadProjectModel(name string) (string, error) {
 		v := b.Get([]byte(name))
 		if v == nil {
 			return errors.New("model not found")
+		}
+		val = append([]byte(nil), v...)
+		return nil
+	})
+	return string(val), err
+}
+
+// SaveProjectInstruction stores the custom instruction for the project.
+func SaveProjectInstruction(name, instr string) error {
+	return db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucketRules))
+		return b.Put([]byte(name), []byte(instr))
+	})
+}
+
+// LoadProjectInstruction returns the stored instruction for the project.
+func LoadProjectInstruction(name string) (string, error) {
+	var val []byte
+	err := db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucketRules))
+		v := b.Get([]byte(name))
+		if v == nil {
+			return errors.New("rule not found")
 		}
 		val = append([]byte(nil), v...)
 		return nil
