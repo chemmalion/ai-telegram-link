@@ -82,12 +82,15 @@ docker build -t tgptbot .
 ```
 
 2. Set the required environment variables before starting the container. When
-running on AWS EC2 you can pull them from AWS Secrets Manager:
+running on AWS EC2 you can pull them from a single AWS Secrets Manager secret
+that stores all values as JSON with keys `tbot-telegram-access-token`,
+`tbot-master-key` and `tbot-allowed-user-ids`:
 
 ```bash
-export BOT_TOKEN=$(aws secretsmanager get-secret-value --secret-id my-bot-token --query SecretString --output text)
-export MASTER_KEY=$(aws secretsmanager get-secret-value --secret-id my-master-key --query SecretString --output text)
-export TBOT_ALLOWED_USER_IDS=$(aws secretsmanager get-secret-value --secret-id my-allowed-users --query SecretString --output text)
+SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id my-tbot-secret --query SecretString --output text)
+export BOT_TOKEN=$(echo "$SECRET_JSON" | jq -r '."tbot-telegram-access-token"')
+export MASTER_KEY=$(echo "$SECRET_JSON" | jq -r '."tbot-master-key"')
+export TBOT_ALLOWED_USER_IDS=$(echo "$SECRET_JSON" | jq -r '."tbot-allowed-user-ids"')
 ```
 
 For local development you may still create a `.env` file from `env.example` and
@@ -112,14 +115,13 @@ The Bolt database will be stored under `data/` on the host.
 
 When running on an EC2 instance the bot can read its credentials directly from
 AWS Secrets Manager instead of a local `.env` file. The helper script
-`start-compose.sh` retrieves the secrets and starts the container using
-Docker Compose. Set the secret names via the environment variables
-`BOT_TOKEN_SECRET_ID`, `MASTER_KEY_SECRET_ID` and `TBOT_ALLOWED_USER_IDS_SECRET_ID` and execute the script:
+`start-compose.sh` retrieves a single secret containing the JSON keys
+`tbot-telegram-access-token`, `tbot-master-key` and `tbot-allowed-user-ids` and
+starts the container using Docker Compose. Set the secret name via the
+environment variable `TBOT_SECRET_ID` and execute the script:
 
 ```bash
-export BOT_TOKEN_SECRET_ID="my-bot-token-secret"
-export MASTER_KEY_SECRET_ID="my-master-key-secret"
-export TBOT_ALLOWED_USER_IDS_SECRET_ID="my-allowed-users-secret"
+export TBOT_SECRET_ID="my-tbot-secret"
 ./start-compose.sh
 ```
 
