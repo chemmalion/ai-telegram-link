@@ -48,10 +48,13 @@ go build -o tgptbot ./cmd/tgptbot
 
 ### In private chat with bot
 
-* `/authproject <name>`  
+* `/authproject <name>`
    → bot prompts you to send the OpenAI API key.
 
 * Send the key as plain text.
+
+* `/setmodel <projectName>`
+  → choose the ChatGPT model for a project (defaults to ChatGPT 5).
 
 * `/listprojects` to see saved projects.
 
@@ -62,7 +65,7 @@ go build -o tgptbot ./cmd/tgptbot
 2. As group admin, `@YourBot /settopic projectName`  
     → links this thread to that project.
 
-3. Any plain message you send now will be forwarded to ChatGPT (GPT-3.5) under that API key.
+3. Any plain message you send now will be forwarded to ChatGPT (GPT-5 by default) under that API key.
 
 4. Bot replies in-thread.
 

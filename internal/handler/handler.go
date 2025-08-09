@@ -16,6 +16,11 @@ import (
 	"telegram-chatgpt-bot/internal/storage"
 )
 
+const (
+	defaultModel  = "gpt-5"
+	fallbackModel = openai.GPT3Dot5Turbo
+)
+
 var (
 	pendingAuth  = map[int64]string{}
 	allowedUsers map[int64]bool
@@ -49,6 +54,27 @@ func parseAllowedUsers() {
 // HandleUpdate processes a Telegram update.
 func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 	ctx = logging.Context(ctx)
+
+	if cq := upd.CallbackQuery; cq != nil {
+		ctx = logging.WithUser(ctx, cq.From.ID)
+		if strings.HasPrefix(cq.Data, "setmodel:") {
+			parts := strings.SplitN(cq.Data, ":", 3)
+			if len(parts) == 3 {
+				proj, model := parts[1], parts[2]
+				if err := storage.SaveProjectModel(proj, model); err != nil {
+					b.AnswerCallbackQuery(ctx, &tg.AnswerCallbackQueryParams{CallbackQueryID: cq.ID, Text: "Save failed"})
+				} else {
+					b.AnswerCallbackQuery(ctx, &tg.AnswerCallbackQueryParams{CallbackQueryID: cq.ID, Text: "Model set"})
+					if cq.Message.Message != nil {
+						b.SendMessage(ctx, &tg.SendMessageParams{ChatID: cq.Message.Message.Chat.ID, Text: fmt.Sprintf("Project '%s' uses model '%s'.", proj, model)})
+					}
+					logging.Ctx(ctx).Info().Str("event", "set_model").Str("project", proj).Str("model", model).Msg("model selected")
+				}
+			}
+		}
+		return
+	}
+
 	if upd.Message == nil {
 		return
 	}
@@ -117,6 +143,50 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 			log.Info().Str("event", "unmap_topic").Int64("chat_id", chatID).Int("topic_id", int(topicID)).Msg("topic unmapped")
 			return
 
+		case "setmodel":
+			proj := args
+			if proj == "" {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "Usage: /setmodel <projectName>"})
+				return
+			}
+			encKey, err := storage.LoadProject(proj)
+			if err != nil {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "Project not found."})
+				return
+			}
+			apiKey, err := crypt.Decrypt(encKey)
+			if err != nil {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "Decrypt error: " + err.Error()})
+				return
+			}
+			client := openai.NewClient(apiKey)
+			modelsList, err := client.ListModels(context.Background())
+			var names []string
+			if err != nil {
+				names = []string{defaultModel, fallbackModel}
+			} else {
+				for _, m := range modelsList.Models {
+					if strings.Contains(m.ID, "gpt") {
+						names = append(names, m.ID)
+					}
+				}
+				if len(names) == 0 {
+					names = []string{defaultModel, fallbackModel}
+				}
+			}
+			buttons := make([][]models.InlineKeyboardButton, len(names))
+			for i, n := range names {
+				buttons[i] = []models.InlineKeyboardButton{{Text: n, CallbackData: fmt.Sprintf("setmodel:%s:%s", proj, n)}}
+			}
+			b.SendMessage(ctx, &tg.SendMessageParams{
+				ChatID: chatID,
+				Text:   fmt.Sprintf("Select model for project '%s':", proj),
+				ReplyMarkup: &models.InlineKeyboardMarkup{
+					InlineKeyboard: buttons,
+				},
+			})
+			return
+
 		case "listprojects":
 			projs, _ := storage.ListProjects()
 			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "Projects: " + strings.Join(projs, ", ")})
@@ -151,15 +221,29 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 		logging.Ctx(ctx).Error().Err(err).Msg("decrypt error")
 		return
 	}
+	model, err := storage.LoadProjectModel(proj)
+	if err != nil || model == "" {
+		model = defaultModel
+	}
 	client := openai.NewClient(apiKey)
-	log.Info().Str("event", "chatgpt_request").Str("project", proj).Str("snippet", logging.Snippet(msg.Text, 30)).Msg("sending to ChatGPT")
+	log.Info().Str("event", "chatgpt_request").Str("project", proj).Str("model", model).Str("snippet", logging.Snippet(msg.Text, 30)).Msg("sending to ChatGPT")
 	resp, err := client.CreateChatCompletion(
 		context.Background(),
 		openai.ChatCompletionRequest{
-			Model:    openai.GPT3Dot5Turbo,
+			Model:    model,
 			Messages: []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: msg.Text}},
 		},
 	)
+	if err != nil && model == defaultModel {
+		model = fallbackModel
+		resp, err = client.CreateChatCompletion(
+			context.Background(),
+			openai.ChatCompletionRequest{
+				Model:    model,
+				Messages: []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: msg.Text}},
+			},
+		)
+	}
 	if err != nil {
 		b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "OpenAI error: " + err.Error()})
 		log.Error().Err(err).Msg("chatgpt request failed")
