@@ -13,6 +13,7 @@ var db *bolt.DB
 const (
 	bucketProjects = "projects"
 	bucketMapping  = "mapping" // key: chatID:topicID, value: projectName
+	bucketModels   = "models"  // key: projectName, value: model
 )
 
 // Init opens the database file and creates buckets if needed.
@@ -27,6 +28,9 @@ func Init(path string) error {
 			return err
 		}
 		if _, err := tx.CreateBucketIfNotExists([]byte(bucketMapping)); err != nil {
+			return err
+		}
+		if _, err := tx.CreateBucketIfNotExists([]byte(bucketModels)); err != nil {
 			return err
 		}
 		return nil
@@ -49,6 +53,29 @@ func LoadProject(name string) (string, error) {
 		v := b.Get([]byte(name))
 		if v == nil {
 			return errors.New("project not found")
+		}
+		val = append([]byte(nil), v...)
+		return nil
+	})
+	return string(val), err
+}
+
+// SaveProjectModel stores the selected model for the given project.
+func SaveProjectModel(name, model string) error {
+	return db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucketModels))
+		return b.Put([]byte(name), []byte(model))
+	})
+}
+
+// LoadProjectModel returns the stored model for the project.
+func LoadProjectModel(name string) (string, error) {
+	var val []byte
+	err := db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucketModels))
+		v := b.Get([]byte(name))
+		if v == nil {
+			return errors.New("model not found")
 		}
 		val = append([]byte(nil), v...)
 		return nil
