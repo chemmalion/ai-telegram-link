@@ -7,3 +7,10 @@ services:
       - TBOT_ALLOWED_USER_IDS=${TBOT_ALLOWED_USER_IDS:--ABSENT--}
     volumes:
       - ${TBOT_DATA_PATH}:/data
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: eu-north-1
+        awslogs-group: /ec2/ai-telegram-link
+        awslogs-stream: bot
+        awslogs-create-group: "true"
