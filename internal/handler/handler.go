@@ -23,6 +23,7 @@ const (
 
 var (
 	pendingAuth  = map[int64]string{}
+	pendingRule  = map[int64]string{}
 	allowedUsers map[int64]bool
 )
 
@@ -66,7 +67,11 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 				} else {
 					b.AnswerCallbackQuery(ctx, &tg.AnswerCallbackQueryParams{CallbackQueryID: cq.ID, Text: "Model set"})
 					if cq.Message.Message != nil {
-						b.SendMessage(ctx, &tg.SendMessageParams{ChatID: cq.Message.Message.Chat.ID, Text: fmt.Sprintf("Project '%s' uses model '%s'.", proj, model)})
+						b.SendMessage(ctx, &tg.SendMessageParams{
+							ChatID:          cq.Message.Message.Chat.ID,
+							MessageThreadID: cq.Message.Message.MessageThreadID,
+							Text:            fmt.Sprintf("Project '%s' uses model '%s'.", proj, model),
+						})
 					}
 					logging.Ctx(ctx).Info().Str("event", "set_model").Str("project", proj).Str("model", model).Msg("model selected")
 				}
@@ -89,7 +94,7 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 
 	if len(allowedUsers) > 0 {
 		if msg.From == nil || !allowedUsers[msg.From.ID] {
-			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "This bot is configured to work only with specific users in Telegram. But the bot source is open so that you can setup your own bot."})
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "This bot is configured to work only with specific users in Telegram. But the bot source is open so that you can setup your own bot."})
 			return
 		}
 	}
@@ -99,64 +104,64 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 		switch cmd {
 		case "authproject":
 			if args == "" {
-				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "Usage: /authproject <projectName>"})
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /authproject <projectName>"})
 				return
 			}
 			prompt := fmt.Sprintf("Please send me the OpenAI API key for project '%s' now.", args)
-			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: prompt})
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: prompt})
 			pendingAuth[msg.From.ID] = args
 			log.Info().Str("event", "authorization_request").Str("project", args).Msg("authorization requested")
 			return
 
 		case "settopic":
 			if topicID == 0 {
-				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "Must be called in a topic thread."})
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Must be called in a topic thread."})
 				return
 			}
 			proj := args
 			if proj == "" {
-				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "Usage: /settopic <projectName>"})
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /settopic <projectName>"})
 				return
 			}
 			if _, err := storage.LoadProject(proj); err != nil {
-				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "Project not found."})
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Project not found."})
 				return
 			}
 			if err := storage.MapTopic(chatID, topicID, proj); err != nil {
-				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "Failed to map topic: " + err.Error()})
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Failed to map topic: " + err.Error()})
 				return
 			}
-			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "Topic mapped to project '" + proj + "'."})
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Topic mapped to project '" + proj + "'."})
 			log.Info().Str("event", "map_topic").Int64("chat_id", chatID).Int("topic_id", int(topicID)).Str("project", proj).Msg("topic mapped")
 			return
 
 		case "unsettopic":
 			if topicID == 0 {
-				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "Must be in a topic thread."})
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Must be in a topic thread."})
 				return
 			}
 			if err := storage.UnmapTopic(chatID, topicID); err != nil {
-				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "Failed to unmap: " + err.Error()})
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Failed to unmap: " + err.Error()})
 				return
 			}
-			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "Topic unmapped."})
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Topic unmapped."})
 			log.Info().Str("event", "unmap_topic").Int64("chat_id", chatID).Int("topic_id", int(topicID)).Msg("topic unmapped")
 			return
 
 		case "setmodel":
 			proj := args
 			if proj == "" {
-				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "Usage: /setmodel <projectName>"})
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /setmodel <projectName>"})
 				return
 			}
 			encKey, err := storage.LoadProject(proj)
 			if err != nil {
-				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "Project not found."})
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Project not found."})
 				return
 			}
 			apiKey, err := crypt.Decrypt(encKey)
 			if err != nil {
-				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "Decrypt error: " + err.Error()})
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Decrypt error: " + err.Error()})
 				return
 			}
 			client := openai.NewClient(apiKey)
@@ -179,17 +184,47 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 				buttons[i] = []models.InlineKeyboardButton{{Text: n, CallbackData: fmt.Sprintf("setmodel:%s:%s", proj, n)}}
 			}
 			b.SendMessage(ctx, &tg.SendMessageParams{
-				ChatID: chatID,
-				Text:   fmt.Sprintf("Select model for project '%s':", proj),
+				ChatID:          chatID,
+				MessageThreadID: topicID,
+				Text:            fmt.Sprintf("Select model for project '%s':", proj),
 				ReplyMarkup: &models.InlineKeyboardMarkup{
 					InlineKeyboard: buttons,
 				},
 			})
 			return
 
+		case "setrule":
+			proj := args
+			if proj == "" {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /setrule <projectName>"})
+				return
+			}
+			if _, err := storage.LoadProject(proj); err != nil {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Project not found."})
+				return
+			}
+			pendingRule[msg.From.ID] = proj
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Enter your custom instruction"})
+			log.Info().Str("event", "rule_request").Str("project", proj).Msg("rule requested")
+			return
+
+		case "showrule":
+			proj := args
+			if proj == "" {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /showrule <projectName>"})
+				return
+			}
+			instr, err := storage.LoadProjectInstruction(proj)
+			if err != nil || instr == "" {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: fmt.Sprintf("No instruction set for project '%s'.", proj)})
+			} else {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: fmt.Sprintf("Instruction for project '%s':\n%s", proj, instr)})
+			}
+			return
+
 		case "listprojects":
 			projs, _ := storage.ListProjects()
-			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "Projects: " + strings.Join(projs, ", ")})
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Projects: " + strings.Join(projs, ", ")})
 			return
 		}
 	}
@@ -199,15 +234,27 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 		enc, err := crypt.Encrypt(key)
 		delete(pendingAuth, msg.From.ID)
 		if err != nil {
-			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "Encryption error: " + err.Error()})
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Encryption error: " + err.Error()})
 			return
 		}
 		if err := storage.SaveProject(pendingProject, enc); err != nil {
-			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "Save error: " + err.Error()})
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Save error: " + err.Error()})
 			return
 		}
-		b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "Project '" + pendingProject + "' saved."})
+		b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Project '" + pendingProject + "' saved."})
 		log.Info().Str("event", "authorization_attempt").Str("project", pendingProject).Msg("api key saved")
+		return
+	}
+
+	if proj, ok := pendingRule[msg.From.ID]; ok && msg.Text != "" {
+		instr := strings.TrimSpace(msg.Text)
+		delete(pendingRule, msg.From.ID)
+		if err := storage.SaveProjectInstruction(proj, instr); err != nil {
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Save error: " + err.Error()})
+			return
+		}
+		b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Instruction saved."})
+		log.Info().Str("event", "set_rule").Str("project", proj).Msg("instruction saved")
 		return
 	}
 
@@ -225,13 +272,19 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 	if err != nil || model == "" {
 		model = defaultModel
 	}
+	instr, _ := storage.LoadProjectInstruction(proj)
+	messages := []openai.ChatCompletionMessage{}
+	if instr != "" {
+		messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleSystem, Content: instr})
+	}
+	messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: msg.Text})
 	client := openai.NewClient(apiKey)
 	log.Info().Str("event", "chatgpt_request").Str("project", proj).Str("model", model).Str("snippet", logging.Snippet(msg.Text, 30)).Msg("sending to ChatGPT")
 	resp, err := client.CreateChatCompletion(
 		context.Background(),
 		openai.ChatCompletionRequest{
 			Model:    model,
-			Messages: []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: msg.Text}},
+			Messages: messages,
 		},
 	)
 	if err != nil && model == defaultModel {
@@ -240,12 +293,12 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 			context.Background(),
 			openai.ChatCompletionRequest{
 				Model:    model,
-				Messages: []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: msg.Text}},
+				Messages: messages,
 			},
 		)
 	}
 	if err != nil {
-		b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: "OpenAI error: " + err.Error()})
+		b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "OpenAI error: " + err.Error()})
 		log.Error().Err(err).Msg("chatgpt request failed")
 		return
 	}
