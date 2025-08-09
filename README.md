@@ -71,7 +71,27 @@ go build -o tgptbot ./cmd/tgptbot
 
 5. Use `/unsettopic` to disable.
 
-## Docker
+## Docker and AWS
+
+When running on an EC2 instance the bot can read its credentials directly from
+AWS Secrets Manager instead of a local `.env` file. The helper script
+`start-compose.sh` retrieves a single secret containing the JSON keys
+`tbot-telegram-access-token`, `tbot-master-key` and `tbot-allowed-user-ids` and
+starts the container using Docker Compose. Set the secret name via the
+environment variable `TBOT_SECRET_ID` and execute the script:
+
+The script requires `aws` CLI credentials to be available (for example via the
+instance's IAM role).
+
+### Shorthand script
+
+```bash
+export TBOT_DATA_PATH=$(pwd)/data
+export TBOT_SECRET_ID=my-tbot-secret
+./start-compose.sh
+```
+
+### Manual run with docker (alternative to shorthand)
 
 A `Dockerfile` and `docker-compose.yml` are included for container based deployment.
 
@@ -106,26 +126,8 @@ Alternatively start it with Docker Compose, which will inherit the environment
 variables set in your shell:
 
 ```bash
-docker-compose up -d
+export TBOT_DATA_PATH=$(pwd)/data
+docker compose up -d
 ```
 
 The Bolt database will be stored under `data/` on the host.
-
-## Deployment with AWS Secrets Manager
-
-When running on an EC2 instance the bot can read its credentials directly from
-AWS Secrets Manager instead of a local `.env` file. The helper script
-`start-compose.sh` retrieves a single secret containing the JSON keys
-`tbot-telegram-access-token`, `tbot-master-key` and `tbot-allowed-user-ids` and
-starts the container using Docker Compose. Set the secret name via the
-environment variable `TBOT_SECRET_ID` and execute the script:
-
-```bash
-export TBOT_SECRET_ID="my-tbot-secret"
-./start-compose.sh
-```
-
-The script requires `aws` CLI credentials to be available (for example via the
-instance's IAM role).
-
-
