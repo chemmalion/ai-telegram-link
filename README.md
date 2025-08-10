@@ -31,7 +31,7 @@ export TBOT_TELEGRAM_KEY="123…"
 export TBOT_CHATGPT_KEY="sk-..."
 export TBOT_MASTER_KEY="base64-32-bytes"
 export TBOT_ALLOWED_USER_IDS="12345,67890"
-export TBOT_HISTORY_LIMIT="10" # number of messages to keep in private chats
+export TBOT_HISTORY_LIMIT="10" # number of messages to keep in private chats (0 disables history)
 export LOG_LEVEL="info" # optional: debug, info, warn, error
 ```
 
@@ -120,7 +120,7 @@ export TBOT_TELEGRAM_KEY=$(echo "$SECRET_JSON" | jq -r '."tbot-telegram-access-t
 export TBOT_MASTER_KEY=$(echo "$SECRET_JSON" | jq -r '."tbot-master-key"')
 export TBOT_CHATGPT_KEY=$(echo "$SECRET_JSON" | jq -r '."tbot-chatgpt-key"')
 export TBOT_ALLOWED_USER_IDS=$(echo "$SECRET_JSON" | jq -r '."tbot-allowed-user-ids"')
-export TBOT_HISTORY_LIMIT=10
+export TBOT_HISTORY_LIMIT=10 # 0 disables history
 ```
 
 For local development you may still create a `.env` file from `env.example` and

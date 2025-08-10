@@ -49,10 +49,12 @@ func Init() {
 	}
 	var err error
 	historyLimit, err = strconv.Atoi(limitStr)
-	if err != nil || historyLimit <= 0 {
-		logging.Log.Fatal().Msg("TBOT_HISTORY_LIMIT must be a positive integer")
+	if err != nil || historyLimit < 0 {
+		logging.Log.Fatal().Msg("TBOT_HISTORY_LIMIT must be a non-negative integer")
 	}
-	topicHistory = make(map[int64][]historyMessage)
+	if historyLimit > 0 {
+		topicHistory = make(map[int64][]historyMessage)
+	}
 }
 
 func parseAllowedUsers() {
@@ -241,7 +243,7 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 	if instr != "" {
 		messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleSystem, Content: instr})
 	}
-	if topicID == 0 {
+	if topicID == 0 && historyLimit > 0 {
 		for _, h := range topicHistory[chatID] {
 			if h.content == "" {
 				continue
@@ -270,7 +272,7 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 		return
 	}
 	messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, MultiContent: parts})
-	if topicID == 0 {
+	if topicID == 0 && historyLimit > 0 {
 		topicHistory[chatID] = append(topicHistory[chatID], historyMessage{role: openai.ChatMessageRoleUser, content: text, messageID: msg.ID})
 	}
 	client := openai.NewClient(chatGPTKey)
@@ -343,7 +345,7 @@ done:
 			MessageID: progressMsg.ID,
 			Text:      res.reply,
 		})
-		if topicID == 0 {
+		if topicID == 0 && historyLimit > 0 {
 			topicHistory[chatID] = append(topicHistory[chatID], historyMessage{role: openai.ChatMessageRoleAssistant, content: res.reply, messageID: progressMsg.ID})
 			pruneTopic0History(ctx, b, chatID)
 		}
@@ -364,7 +366,7 @@ done:
 		MessageID: progressMsg.ID,
 		Text:      chunks[0],
 	})
-	if topicID == 0 {
+	if topicID == 0 && historyLimit > 0 {
 		topicHistory[chatID] = append(topicHistory[chatID], historyMessage{role: openai.ChatMessageRoleAssistant, content: chunks[0], messageID: progressMsg.ID})
 	}
 	for _, chunk := range chunks[1:] {
@@ -373,11 +375,11 @@ done:
 			MessageThreadID: topicID,
 			Text:            chunk,
 		})
-		if topicID == 0 {
+		if topicID == 0 && historyLimit > 0 {
 			topicHistory[chatID] = append(topicHistory[chatID], historyMessage{role: openai.ChatMessageRoleAssistant, content: chunk, messageID: m.ID})
 		}
 	}
-	if topicID == 0 {
+	if topicID == 0 && historyLimit > 0 {
 		pruneTopic0History(ctx, b, chatID)
 	}
 }
