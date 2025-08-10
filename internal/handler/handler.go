@@ -123,10 +123,6 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 			return
 
 		case "settopic":
-			if topicID == 0 {
-				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Must be called in a topic thread."})
-				return
-			}
 			proj := args
 			if proj == "" {
 				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /settopic <projectName>"})
