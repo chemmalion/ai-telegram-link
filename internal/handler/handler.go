@@ -92,8 +92,12 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 	if msg.From != nil {
 		ctx = logging.WithUser(ctx, msg.From.ID)
 	}
+	text := msg.Text
+	if text == "" {
+		text = msg.Caption
+	}
 	log := logging.Ctx(ctx)
-	log.Info().Str("event", "telegram_request").Int64("chat_id", chatID).Int("topic_id", int(topicID)).Str("snippet", logging.Snippet(msg.Text, 30)).Msg("incoming message")
+	log.Info().Str("event", "telegram_request").Int64("chat_id", chatID).Int("topic_id", int(topicID)).Str("snippet", logging.Snippet(text, 30)).Msg("incoming message")
 
 	if len(allowedUsers) > 0 {
 		if msg.From == nil || !allowedUsers[msg.From.ID] {
@@ -253,9 +257,29 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 	if instr != "" {
 		messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleSystem, Content: instr})
 	}
-	messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: msg.Text})
+	var parts []openai.ChatMessagePart
+	if text != "" {
+		parts = append(parts, openai.ChatMessagePart{Type: openai.ChatMessagePartTypeText, Text: text})
+	}
+	if len(msg.Photo) > 0 {
+		fileID := msg.Photo[len(msg.Photo)-1].FileID
+		file, err := b.GetFile(ctx, &tg.GetFileParams{FileID: fileID})
+		if err != nil {
+			log.Error().Err(err).Msg("failed to get file")
+		} else {
+			url := b.FileDownloadLink(file)
+			parts = append(parts, openai.ChatMessagePart{
+				Type:     openai.ChatMessagePartTypeImageURL,
+				ImageURL: &openai.ChatMessageImageURL{URL: url},
+			})
+		}
+	}
+	if len(parts) == 0 {
+		return
+	}
+	messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, MultiContent: parts})
 	client := openai.NewClient(chatGPTKey)
-	log.Info().Str("event", "chatgpt_request").Str("project", proj).Str("model", model).Str("snippet", logging.Snippet(msg.Text, 30)).Msg("sending to ChatGPT")
+	log.Info().Str("event", "chatgpt_request").Str("project", proj).Str("model", model).Str("snippet", logging.Snippet(text, 30)).Msg("sending to ChatGPT")
 	resp, err := client.CreateChatCompletion(
 		context.Background(),
 		openai.ChatCompletionRequest{
