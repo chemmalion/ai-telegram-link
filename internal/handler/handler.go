@@ -23,6 +23,7 @@ const (
 
 var (
 	pendingRule  = map[int64]string{}
+	pendingModel = map[int64]string{}
 	allowedUsers map[int64]bool
 	chatGPTKey   string
 	historyLimit int
@@ -78,27 +79,7 @@ func parseAllowedUsers() {
 func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 	ctx = logging.Context(ctx)
 
-	if cq := upd.CallbackQuery; cq != nil {
-		ctx = logging.WithUser(ctx, cq.From.ID)
-		if strings.HasPrefix(cq.Data, "setmodel:") {
-			parts := strings.SplitN(cq.Data, ":", 3)
-			if len(parts) == 3 {
-				proj, model := parts[1], parts[2]
-				if err := storage.SaveProjectModel(proj, model); err != nil {
-					b.AnswerCallbackQuery(ctx, &tg.AnswerCallbackQueryParams{CallbackQueryID: cq.ID, Text: "Save failed"})
-				} else {
-					b.AnswerCallbackQuery(ctx, &tg.AnswerCallbackQueryParams{CallbackQueryID: cq.ID, Text: "Model set"})
-					if cq.Message.Message != nil {
-						b.SendMessage(ctx, &tg.SendMessageParams{
-							ChatID:          cq.Message.Message.Chat.ID,
-							MessageThreadID: cq.Message.Message.MessageThreadID,
-							Text:            fmt.Sprintf("Project '%s' uses model '%s'.", proj, model),
-						})
-					}
-					logging.Ctx(ctx).Info().Str("event", "set_model").Str("project", proj).Str("model", model).Msg("model selected")
-				}
-			}
-		}
+	if upd.CallbackQuery != nil {
 		return
 	}
 
@@ -186,33 +167,9 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Project not found."})
 				return
 			}
-			client := openai.NewClient(chatGPTKey)
-			modelsList, err := client.ListModels(context.Background())
-			var names []string
-			if err != nil {
-				names = []string{defaultModel, fallbackModel}
-			} else {
-				for _, m := range modelsList.Models {
-					if strings.Contains(m.ID, "gpt") {
-						names = append(names, m.ID)
-					}
-				}
-				if len(names) == 0 {
-					names = []string{defaultModel, fallbackModel}
-				}
-			}
-			buttons := make([][]models.InlineKeyboardButton, len(names))
-			for i, n := range names {
-				buttons[i] = []models.InlineKeyboardButton{{Text: n, CallbackData: fmt.Sprintf("setmodel:%s:%s", proj, n)}}
-			}
-			b.SendMessage(ctx, &tg.SendMessageParams{
-				ChatID:          chatID,
-				MessageThreadID: topicID,
-				Text:            fmt.Sprintf("Select model for project '%s':", proj),
-				ReplyMarkup: &models.InlineKeyboardMarkup{
-					InlineKeyboard: buttons,
-				},
-			})
+			pendingModel[msg.From.ID] = proj
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Enter model name"})
+			log.Info().Str("event", "model_request").Str("project", proj).Msg("model requested")
 			return
 
 		case "setrule":
@@ -249,6 +206,18 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Projects: " + strings.Join(projs, ", ")})
 			return
 		}
+	}
+
+	if proj, ok := pendingModel[msg.From.ID]; ok && msg.Text != "" {
+		model := strings.TrimSpace(msg.Text)
+		delete(pendingModel, msg.From.ID)
+		if err := storage.SaveProjectModel(proj, model); err != nil {
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Save error: " + err.Error()})
+			return
+		}
+		b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: fmt.Sprintf("Project '%s' uses model '%s'.", proj, model)})
+		log.Info().Str("event", "set_model").Str("project", proj).Str("model", model).Msg("model set")
+		return
 	}
 
 	if proj, ok := pendingRule[msg.From.ID]; ok && msg.Text != "" {
