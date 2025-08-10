@@ -22,19 +22,13 @@ const (
 )
 
 var (
-	pendingRule  = map[int64]string{}
-	pendingModel = map[int64]string{}
-	allowedUsers map[int64]bool
-	chatGPTKey   string
-	historyLimit int
-	topicHistory map[int64][]historyMessage
+	pendingRule      = map[int64]string{}
+	pendingModel     = map[int64]string{}
+	pendingHistLimit = map[int64]string{}
+	pendingClearHist = map[int64]string{}
+	allowedUsers     map[int64]bool
+	chatGPTKey       string
 )
-
-type historyMessage struct {
-	role      string
-	content   string
-	messageID int
-}
 
 // Init parses the allowed user ids from the environment.
 func Init() {
@@ -42,18 +36,6 @@ func Init() {
 	chatGPTKey = os.Getenv("TBOT_CHATGPT_KEY")
 	if chatGPTKey == "" {
 		logging.Log.Fatal().Msg("TBOT_CHATGPT_KEY env var is required")
-	}
-	limitStr := os.Getenv("TBOT_HISTORY_LIMIT")
-	if limitStr == "" {
-		logging.Log.Fatal().Msg("TBOT_HISTORY_LIMIT env var is required")
-	}
-	var err error
-	historyLimit, err = strconv.Atoi(limitStr)
-	if err != nil || historyLimit < 0 {
-		logging.Log.Fatal().Msg("TBOT_HISTORY_LIMIT must be a non-negative integer")
-	}
-	if historyLimit > 0 {
-		topicHistory = make(map[int64][]historyMessage)
 	}
 }
 
@@ -199,6 +181,52 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 			}
 			return
 
+		case "history":
+			proj := args
+			if proj == "" {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /history <projectName>"})
+				return
+			}
+			if exists, err := storage.ProjectExists(proj); err != nil || !exists {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Project not found."})
+				return
+			}
+			limit, _ := storage.LoadHistoryLimit(proj)
+			count, _ := storage.CountProjectHistory(proj)
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: fmt.Sprintf("For project '%s' history limit is %d and there are %d stored messages.", proj, limit, count)})
+			return
+
+		case "set-history-limit":
+			proj := args
+			if proj == "" {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /set-history-limit <projectName>"})
+				return
+			}
+			if exists, err := storage.ProjectExists(proj); err != nil || !exists {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Project not found."})
+				return
+			}
+			pendingHistLimit[msg.From.ID] = proj
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Enter new history limit (0 to disable)."})
+			log.Info().Str("event", "history_limit_request").Str("project", proj).Msg("history limit requested")
+			return
+
+		case "clear-history":
+			proj := args
+			if proj == "" {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /clear-history <projectName>"})
+				return
+			}
+			if exists, err := storage.ProjectExists(proj); err != nil || !exists {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Project not found."})
+				return
+			}
+			count, _ := storage.CountProjectHistory(proj)
+			pendingClearHist[msg.From.ID] = proj
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: fmt.Sprintf("The %d messages will be removed from the '%s' project. Please type the word 'confirm' to continue.", count, proj)})
+			log.Info().Str("event", "clear_history_request").Str("project", proj).Int("count", count).Msg("clear history requested")
+			return
+
 		case "listprojects":
 			projs, _ := storage.ListProjects()
 			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Projects: " + strings.Join(projs, ", ")})
@@ -230,6 +258,40 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 		return
 	}
 
+	if proj, ok := pendingHistLimit[msg.From.ID]; ok && msg.Text != "" {
+		limitStr := strings.TrimSpace(msg.Text)
+		delete(pendingHistLimit, msg.From.ID)
+		limit, err := strconv.Atoi(limitStr)
+		if err != nil || limit < 0 {
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Please enter a non-negative integer."})
+			return
+		}
+		if err := storage.SaveHistoryLimit(proj, limit); err != nil {
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Save error: " + err.Error()})
+			return
+		}
+		b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: fmt.Sprintf("History limit for project '%s' set to %d.", proj, limit)})
+		log.Info().Str("event", "set_history_limit").Str("project", proj).Int("limit", limit).Msg("history limit set")
+		return
+	}
+
+	if proj, ok := pendingClearHist[msg.From.ID]; ok && msg.Text != "" {
+		resp := strings.ToLower(strings.TrimSpace(msg.Text))
+		delete(pendingClearHist, msg.From.ID)
+		if resp != "confirm" {
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Cancelled."})
+			return
+		}
+		removed, err := storage.ClearProjectHistory(proj)
+		if err != nil {
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Clear error: " + err.Error()})
+			return
+		}
+		b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: fmt.Sprintf("Cleared %d messages from project '%s'.", removed, proj)})
+		log.Info().Str("event", "clear_history").Str("project", proj).Int("removed", removed).Msg("history cleared")
+		return
+	}
+
 	proj, err := storage.GetMappedProject(chatID, topicID)
 	if err != nil {
 		return
@@ -243,12 +305,14 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 	if instr != "" {
 		messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleSystem, Content: instr})
 	}
-	if topicID == 0 && historyLimit > 0 {
-		for _, h := range topicHistory[chatID] {
-			if h.content == "" {
+	limit, _ := storage.LoadHistoryLimit(proj)
+	hist, _ := storage.LoadProjectHistory(proj)
+	if limit > 0 && len(hist) > 0 {
+		for _, h := range hist {
+			if h.Content == "" {
 				continue
 			}
-			messages = append(messages, openai.ChatCompletionMessage{Role: h.role, Content: h.content})
+			messages = append(messages, openai.ChatCompletionMessage{Role: h.Role, Content: h.Content})
 		}
 	}
 	var parts []openai.ChatMessagePart
@@ -272,8 +336,18 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 		return
 	}
 	messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, MultiContent: parts})
-	if topicID == 0 && historyLimit > 0 {
-		topicHistory[chatID] = append(topicHistory[chatID], historyMessage{role: openai.ChatMessageRoleUser, content: text, messageID: msg.ID})
+	if limit > 0 && text != "" {
+		userName := msg.From.Username
+		if userName == "" {
+			userName = msg.From.FirstName
+		}
+		storage.AddHistoryMessage(proj, storage.HistoryMessage{
+			Role:    openai.ChatMessageRoleUser,
+			WhoID:   msg.From.ID,
+			WhoName: userName,
+			When:    time.Now().Unix(),
+			Content: text,
+		})
 	}
 	client := openai.NewClient(chatGPTKey)
 	log.Info().Str("event", "chatgpt_request").Str("project", proj).Str("model", model).Str("snippet", logging.Snippet(text, 30)).Msg("sending to ChatGPT")
@@ -345,9 +419,15 @@ done:
 			MessageID: progressMsg.ID,
 			Text:      res.reply,
 		})
-		if topicID == 0 && historyLimit > 0 {
-			topicHistory[chatID] = append(topicHistory[chatID], historyMessage{role: openai.ChatMessageRoleAssistant, content: res.reply, messageID: progressMsg.ID})
-			pruneTopic0History(ctx, b, chatID)
+		if limit > 0 {
+			storage.AddHistoryMessage(proj, storage.HistoryMessage{
+				Role:    openai.ChatMessageRoleAssistant,
+				WhoID:   0,
+				WhoName: "ChatGPT " + model,
+				When:    time.Now().Unix(),
+				Content: res.reply,
+			})
+			storage.TrimProjectHistory(proj, limit)
 		}
 		log.Error().Err(res.err).Msg("chatgpt request failed")
 		return
@@ -366,21 +446,22 @@ done:
 		MessageID: progressMsg.ID,
 		Text:      chunks[0],
 	})
-	if topicID == 0 && historyLimit > 0 {
-		topicHistory[chatID] = append(topicHistory[chatID], historyMessage{role: openai.ChatMessageRoleAssistant, content: chunks[0], messageID: progressMsg.ID})
-	}
 	for _, chunk := range chunks[1:] {
-		m, _ := b.SendMessage(ctx, &tg.SendMessageParams{
+		b.SendMessage(ctx, &tg.SendMessageParams{
 			ChatID:          chatID,
 			MessageThreadID: topicID,
 			Text:            chunk,
 		})
-		if topicID == 0 && historyLimit > 0 {
-			topicHistory[chatID] = append(topicHistory[chatID], historyMessage{role: openai.ChatMessageRoleAssistant, content: chunk, messageID: m.ID})
-		}
 	}
-	if topicID == 0 && historyLimit > 0 {
-		pruneTopic0History(ctx, b, chatID)
+	if limit > 0 {
+		storage.AddHistoryMessage(proj, storage.HistoryMessage{
+			Role:    openai.ChatMessageRoleAssistant,
+			WhoID:   0,
+			WhoName: "ChatGPT " + model,
+			When:    time.Now().Unix(),
+			Content: reply,
+		})
+		storage.TrimProjectHistory(proj, limit)
 	}
 }
 
@@ -413,19 +494,4 @@ func splitMessage(text string, size int) []string {
 		runes = runes[end:]
 	}
 	return chunks
-}
-
-func pruneTopic0History(ctx context.Context, b *tg.Bot, chatID int64) {
-	hist := topicHistory[chatID]
-	if len(hist) <= historyLimit {
-		return
-	}
-	excess := len(hist) - historyLimit
-	for i := 0; i < excess; i++ {
-		h := hist[i]
-		if _, err := b.DeleteMessage(ctx, &tg.DeleteMessageParams{ChatID: chatID, MessageID: h.messageID}); err != nil {
-			logging.Ctx(ctx).Error().Err(err).Int("message_id", h.messageID).Msg("failed to delete message")
-		}
-	}
-	topicHistory[chatID] = hist[excess:]
 }
