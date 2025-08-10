@@ -54,7 +54,7 @@ go build -o tgptbot ./cmd/tgptbot
   → register a new project.
 
 * `/setmodel <projectName>`
-  → choose the ChatGPT model for a project (defaults to ChatGPT 5).
+  → set the ChatGPT model for a project (defaults to ChatGPT 5). After running the command, the bot asks you to enter the model name.
 
 * `/listprojects` to see saved projects.
 
