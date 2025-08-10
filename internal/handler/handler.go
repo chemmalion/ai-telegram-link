@@ -196,6 +196,34 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: fmt.Sprintf("For project '%s' history limit is %d and there are %d stored messages.", proj, limit, count)})
 			return
 
+		case "history-messages":
+			proj := args
+			if proj == "" {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /history-messages <projectName>"})
+				return
+			}
+			if exists, err := storage.ProjectExists(proj); err != nil || !exists {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Project not found."})
+				return
+			}
+			hist, err := storage.LoadProjectHistory(proj)
+			if err != nil || len(hist) == 0 {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "No stored messages."})
+				return
+			}
+			var sb strings.Builder
+			for _, h := range hist {
+				when := time.Unix(h.When, 0).Format("15:04:05 02.01.2006")
+				snippet := []rune(h.Content)
+				if len(snippet) > 30 {
+					snippet = snippet[:30]
+				}
+				fmt.Fprintf(&sb, "%s %s:\n%s\n\n", when, h.WhoName, string(snippet))
+			}
+			out := strings.TrimSpace(sb.String())
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: out})
+			return
+
 		case "set-history-limit":
 			proj := args
 			if proj == "" {
@@ -292,6 +320,10 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 		return
 	}
 
+	if text == "" && len(msg.Photo) == 0 {
+		return
+	}
+
 	proj, err := storage.GetMappedProject(chatID, topicID)
 	if err != nil {
 		return
@@ -312,13 +344,22 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 			if h.Content == "" {
 				continue
 			}
-			messages = append(messages, openai.ChatCompletionMessage{Role: h.Role, Content: h.Content})
+			when := time.Unix(h.When, 0).Format("2006-01-02 15:04:05")
+			prefix := fmt.Sprintf("%s %s:\n", when, h.WhoName)
+			messages = append(messages, openai.ChatCompletionMessage{Role: h.Role, Content: prefix + h.Content, Name: chatName(h.WhoName)})
 		}
 	}
-	var parts []openai.ChatMessagePart
-	if text != "" {
-		parts = append(parts, openai.ChatMessagePart{Type: openai.ChatMessagePartTypeText, Text: text})
+	userName := msg.From.Username
+	if userName == "" {
+		userName = msg.From.FirstName
 	}
+	now := time.Now()
+	meta := fmt.Sprintf("%s %s:", now.Format("2006-01-02 15:04:05"), userName)
+	if text != "" {
+		meta += "\n" + text
+	}
+	var parts []openai.ChatMessagePart
+	parts = append(parts, openai.ChatMessagePart{Type: openai.ChatMessagePartTypeText, Text: meta})
 	if len(msg.Photo) > 0 {
 		fileID := msg.Photo[len(msg.Photo)-1].FileID
 		file, err := b.GetFile(ctx, &tg.GetFileParams{FileID: fileID})
@@ -332,22 +373,27 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 			})
 		}
 	}
-	if len(parts) == 0 {
-		return
-	}
-	messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, MultiContent: parts})
-	if limit > 0 && text != "" {
-		userName := msg.From.Username
-		if userName == "" {
-			userName = msg.From.FirstName
+	messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, MultiContent: parts, Name: chatName(userName)})
+	if limit > 0 {
+		whenUnix := now.Unix()
+		if text != "" {
+			storage.AddHistoryMessage(proj, storage.HistoryMessage{
+				Role:    openai.ChatMessageRoleUser,
+				WhoID:   msg.From.ID,
+				WhoName: userName,
+				When:    whenUnix,
+				Content: text,
+			})
 		}
-		storage.AddHistoryMessage(proj, storage.HistoryMessage{
-			Role:    openai.ChatMessageRoleUser,
-			WhoID:   msg.From.ID,
-			WhoName: userName,
-			When:    time.Now().Unix(),
-			Content: text,
-		})
+		if len(msg.Photo) > 0 {
+			storage.AddHistoryMessage(proj, storage.HistoryMessage{
+				Role:    openai.ChatMessageRoleUser,
+				WhoID:   msg.From.ID,
+				WhoName: userName,
+				When:    whenUnix,
+				Content: "(User has attached some image)",
+			})
+		}
 	}
 	client := openai.NewClient(chatGPTKey)
 	log.Info().Str("event", "chatgpt_request").Str("project", proj).Str("model", model).Str("snippet", logging.Snippet(text, 30)).Msg("sending to ChatGPT")
@@ -494,4 +540,21 @@ func splitMessage(text string, size int) []string {
 		runes = runes[end:]
 	}
 	return chunks
+}
+
+func chatName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	name = strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			return r
+		}
+		return '_'
+	}, name)
+	if len(name) > 64 {
+		name = name[:64]
+	}
+	return name
 }

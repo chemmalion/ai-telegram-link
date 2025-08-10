@@ -65,6 +65,9 @@ go build -o tgptbot ./cmd/tgptbot
 * `/history <projectName>`
   → show current history limit and stored message count.
 
+* `/history-messages <projectName>`
+  → display the stored messages for a project (showing first 30 characters of each).
+
 * `/set-history-limit <projectName>`
   → change how many messages are kept for the project (0 disables history).
 
