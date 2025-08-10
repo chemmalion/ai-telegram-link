@@ -31,6 +31,7 @@ export TBOT_TELEGRAM_KEY="123…"
 export TBOT_CHATGPT_KEY="sk-..."
 export TBOT_MASTER_KEY="base64-32-bytes"
 export TBOT_ALLOWED_USER_IDS="12345,67890"
+export TBOT_HISTORY_LIMIT="10" # number of messages to keep in private chats
 export LOG_LEVEL="info" # optional: debug, info, warn, error
 ```
 
@@ -56,7 +57,14 @@ go build -o tgptbot ./cmd/tgptbot
 * `/setmodel <projectName>`
   → set the ChatGPT model for a project (defaults to ChatGPT 5). After running the command, the bot asks you to enter the model name.
 
-* `/listprojects` to see saved projects.
+* `/setrule <projectName>`
+  → set a custom instruction for the project. The bot will prompt you to enter the instruction.
+
+* `/showrule <projectName>`
+  → display the current instruction for a project.
+
+* `/listprojects`
+  → see saved projects.
 
 ### In a group with topics enabled
 
@@ -112,6 +120,7 @@ export TBOT_TELEGRAM_KEY=$(echo "$SECRET_JSON" | jq -r '."tbot-telegram-access-t
 export TBOT_MASTER_KEY=$(echo "$SECRET_JSON" | jq -r '."tbot-master-key"')
 export TBOT_CHATGPT_KEY=$(echo "$SECRET_JSON" | jq -r '."tbot-chatgpt-key"')
 export TBOT_ALLOWED_USER_IDS=$(echo "$SECRET_JSON" | jq -r '."tbot-allowed-user-ids"')
+export TBOT_HISTORY_LIMIT=10
 ```
 
 For local development you may still create a `.env` file from `env.example` and
@@ -120,7 +129,7 @@ manually provide the values.
 3. Run the container with a persistent data directory:
 
 ```bash
-docker run -e TBOT_TELEGRAM_KEY -e TBOT_MASTER_KEY -e TBOT_CHATGPT_KEY -e TBOT_ALLOWED_USER_IDS -v $(pwd)/data:/data tgptbot
+docker run -e TBOT_TELEGRAM_KEY -e TBOT_MASTER_KEY -e TBOT_CHATGPT_KEY -e TBOT_ALLOWED_USER_IDS -e TBOT_HISTORY_LIMIT -v $(pwd)/data:/data tgptbot
 ```
 
 Alternatively start it with Docker Compose, which will inherit the environment
