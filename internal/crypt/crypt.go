@@ -13,15 +13,15 @@ import (
 
 var aesGCM cipher.AEAD
 
-// Init sets up the AES-GCM cipher using the MASTER_KEY env var.
+// Init sets up the AES-GCM cipher using the TBOT_MASTER_KEY env var.
 func Init() {
-	keyB64 := os.Getenv("MASTER_KEY")
+	keyB64 := os.Getenv("TBOT_MASTER_KEY")
 	if keyB64 == "" {
-		logging.Log.Fatal().Msg("MASTER_KEY env var is required (base64-encoded 32 bytes)")
+		logging.Log.Fatal().Msg("TBOT_MASTER_KEY env var is required (base64-encoded 32 bytes)")
 	}
 	key, err := base64.StdEncoding.DecodeString(keyB64)
 	if err != nil || len(key) != 32 {
-		logging.Log.Fatal().Err(err).Msg("invalid MASTER_KEY")
+		logging.Log.Fatal().Err(err).Msg("invalid TBOT_MASTER_KEY")
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {

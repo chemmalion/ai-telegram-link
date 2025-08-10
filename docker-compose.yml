@@ -2,8 +2,9 @@ services:
   bot:
     build: .
     environment:
-      - BOT_TOKEN=${BOT_TOKEN:--ABSENT--}
-      - MASTER_KEY=${MASTER_KEY:--ABSENT--}
+      - TBOT_TELEGRAM_KEY=${TBOT_TELEGRAM_KEY:--ABSENT--}
+      - TBOT_MASTER_KEY=${TBOT_MASTER_KEY:--ABSENT--}
+      - TBOT_CHATGPT_KEY=${TBOT_CHATGPT_KEY:--ABSENT--}
       - TBOT_ALLOWED_USER_IDS=${TBOT_ALLOWED_USER_IDS:--ABSENT--}
     volumes:
       - ${TBOT_DATA_PATH}:/data

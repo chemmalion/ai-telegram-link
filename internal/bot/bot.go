@@ -26,9 +26,9 @@ func Run() {
 	}
 
 	// create Telegram API client
-	botToken := os.Getenv("BOT_TOKEN")
+	botToken := os.Getenv("TBOT_TELEGRAM_KEY")
 	if botToken == "" {
-		logging.Log.Fatal().Msg("BOT_TOKEN env var is required")
+		logging.Log.Fatal().Msg("TBOT_TELEGRAM_KEY env var is required")
 	}
 
 	b, err := tg.New(botToken, tg.WithDefaultHandler(handler.HandleUpdate))
