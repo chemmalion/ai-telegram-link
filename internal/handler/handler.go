@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	tg "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -280,36 +281,98 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 	messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, MultiContent: parts})
 	client := openai.NewClient(chatGPTKey)
 	log.Info().Str("event", "chatgpt_request").Str("project", proj).Str("model", model).Str("snippet", logging.Snippet(text, 30)).Msg("sending to ChatGPT")
-	resp, err := client.CreateChatCompletion(
-		context.Background(),
-		openai.ChatCompletionRequest{
-			Model:    model,
-			Messages: messages,
-		},
-	)
-	if err != nil && model == defaultModel {
-		model = fallbackModel
-		resp, err = client.CreateChatCompletion(
+
+	// send initial progress message and keep its ID for further edits
+	progressMsg, _ := b.SendMessage(ctx, &tg.SendMessageParams{
+		ChatID:          chatID,
+		MessageThreadID: topicID,
+		Text:            "Sending to ChatGPT...",
+		ReplyParameters: &models.ReplyParameters{MessageID: msg.ID},
+	})
+
+	type gptResult struct {
+		reply string
+		err   error
+	}
+	resultCh := make(chan gptResult, 1)
+
+	// run ChatGPT request asynchronously
+	go func() {
+		resp, err := client.CreateChatCompletion(
 			context.Background(),
 			openai.ChatCompletionRequest{
 				Model:    model,
 				Messages: messages,
 			},
 		)
+		if err != nil && model == defaultModel {
+			resp, err = client.CreateChatCompletion(
+				context.Background(),
+				openai.ChatCompletionRequest{
+					Model:    fallbackModel,
+					Messages: messages,
+				},
+			)
+		}
+		if err != nil {
+			resultCh <- gptResult{reply: "OpenAI error: " + err.Error(), err: err}
+			return
+		}
+		resultCh <- gptResult{reply: resp.Choices[0].Message.Content}
+	}()
+
+	ticker := time.NewTicker(10 * time.Second)
+	start := time.Now()
+	var res gptResult
+	for {
+		select {
+		case res = <-resultCh:
+			ticker.Stop()
+			goto done
+		case <-ticker.C:
+			elapsed := int(time.Since(start).Seconds())
+			_, err := b.EditMessageText(ctx, &tg.EditMessageTextParams{
+				ChatID:    chatID,
+				MessageID: progressMsg.ID,
+				Text:      fmt.Sprintf("Waiting %d seconds for ChatGPT answer...", elapsed),
+			})
+			if err != nil {
+				log.Error().Err(err).Msg("failed to edit progress message")
+			}
+		}
 	}
-	if err != nil {
-		b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "OpenAI error: " + err.Error()})
-		log.Error().Err(err).Msg("chatgpt request failed")
+
+done:
+	if res.err != nil {
+		b.EditMessageText(ctx, &tg.EditMessageTextParams{
+			ChatID:    chatID,
+			MessageID: progressMsg.ID,
+			Text:      res.reply,
+		})
+		log.Error().Err(res.err).Msg("chatgpt request failed")
 		return
 	}
-	reply := resp.Choices[0].Message.Content
+
+	reply := res.reply
 	log.Info().Str("event", "chatgpt_response").Str("project", proj).Str("snippet", logging.Snippet(reply, 30)).Msg("received from ChatGPT")
-	b.SendMessage(ctx, &tg.SendMessageParams{
-		ChatID:          chatID,
-		MessageThreadID: topicID,
-		Text:            reply,
-		ReplyParameters: &models.ReplyParameters{MessageID: msg.ID},
+
+	const maxMessageLen = 4000
+	chunks := splitMessage(reply, maxMessageLen)
+	if len(chunks) == 0 {
+		return
+	}
+	b.EditMessageText(ctx, &tg.EditMessageTextParams{
+		ChatID:    chatID,
+		MessageID: progressMsg.ID,
+		Text:      chunks[0],
 	})
+	for _, chunk := range chunks[1:] {
+		b.SendMessage(ctx, &tg.SendMessageParams{
+			ChatID:          chatID,
+			MessageThreadID: topicID,
+			Text:            chunk,
+		})
+	}
 }
 
 func parseCommand(msg *models.Message) (cmd, args string, ok bool) {
@@ -324,4 +387,21 @@ func parseCommand(msg *models.Message) (cmd, args string, ok bool) {
 		}
 	}
 	return "", "", false
+}
+
+func splitMessage(text string, size int) []string {
+	runes := []rune(text)
+	if len(runes) == 0 {
+		return nil
+	}
+	var chunks []string
+	for len(runes) > 0 {
+		end := size
+		if len(runes) < end {
+			end = len(runes)
+		}
+		chunks = append(chunks, string(runes[:end]))
+		runes = runes[end:]
+	}
+	return chunks
 }
