@@ -9,7 +9,7 @@ require (
 	github.com/go-telegram/bot v1.16.0
 	github.com/google/uuid v1.6.0
 	github.com/rs/zerolog v1.33.0
-	github.com/sashabaranov/go-openai v1.8.0
+	github.com/sashabaranov/go-openai v1.40.5
 )
 
 require (
