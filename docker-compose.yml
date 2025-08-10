@@ -6,7 +6,6 @@ services:
       - TBOT_MASTER_KEY=${TBOT_MASTER_KEY:--ABSENT--}
       - TBOT_CHATGPT_KEY=${TBOT_CHATGPT_KEY:--ABSENT--}
       - TBOT_ALLOWED_USER_IDS=${TBOT_ALLOWED_USER_IDS:--ABSENT--}
-      - TBOT_HISTORY_LIMIT=${TBOT_HISTORY_LIMIT:--ABSENT--}
     volumes:
       - ${TBOT_DATA_PATH}:/data
     logging:
