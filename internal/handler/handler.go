@@ -25,7 +25,15 @@ var (
 	pendingRule  = map[int64]string{}
 	allowedUsers map[int64]bool
 	chatGPTKey   string
+	historyLimit int
+	topicHistory map[int64][]historyMessage
 )
+
+type historyMessage struct {
+	role      string
+	content   string
+	messageID int
+}
 
 // Init parses the allowed user ids from the environment.
 func Init() {
@@ -34,6 +42,16 @@ func Init() {
 	if chatGPTKey == "" {
 		logging.Log.Fatal().Msg("TBOT_CHATGPT_KEY env var is required")
 	}
+	limitStr := os.Getenv("TBOT_HISTORY_LIMIT")
+	if limitStr == "" {
+		logging.Log.Fatal().Msg("TBOT_HISTORY_LIMIT env var is required")
+	}
+	var err error
+	historyLimit, err = strconv.Atoi(limitStr)
+	if err != nil || historyLimit <= 0 {
+		logging.Log.Fatal().Msg("TBOT_HISTORY_LIMIT must be a positive integer")
+	}
+	topicHistory = make(map[int64][]historyMessage)
 }
 
 func parseAllowedUsers() {
@@ -258,6 +276,14 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 	if instr != "" {
 		messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleSystem, Content: instr})
 	}
+	if topicID == 0 {
+		for _, h := range topicHistory[chatID] {
+			if h.content == "" {
+				continue
+			}
+			messages = append(messages, openai.ChatCompletionMessage{Role: h.role, Content: h.content})
+		}
+	}
 	var parts []openai.ChatMessagePart
 	if text != "" {
 		parts = append(parts, openai.ChatMessagePart{Type: openai.ChatMessagePartTypeText, Text: text})
@@ -279,6 +305,9 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 		return
 	}
 	messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, MultiContent: parts})
+	if topicID == 0 {
+		topicHistory[chatID] = append(topicHistory[chatID], historyMessage{role: openai.ChatMessageRoleUser, content: text, messageID: msg.ID})
+	}
 	client := openai.NewClient(chatGPTKey)
 	log.Info().Str("event", "chatgpt_request").Str("project", proj).Str("model", model).Str("snippet", logging.Snippet(text, 30)).Msg("sending to ChatGPT")
 
@@ -349,6 +378,10 @@ done:
 			MessageID: progressMsg.ID,
 			Text:      res.reply,
 		})
+		if topicID == 0 {
+			topicHistory[chatID] = append(topicHistory[chatID], historyMessage{role: openai.ChatMessageRoleAssistant, content: res.reply, messageID: progressMsg.ID})
+			pruneTopic0History(ctx, b, chatID)
+		}
 		log.Error().Err(res.err).Msg("chatgpt request failed")
 		return
 	}
@@ -366,12 +399,21 @@ done:
 		MessageID: progressMsg.ID,
 		Text:      chunks[0],
 	})
+	if topicID == 0 {
+		topicHistory[chatID] = append(topicHistory[chatID], historyMessage{role: openai.ChatMessageRoleAssistant, content: chunks[0], messageID: progressMsg.ID})
+	}
 	for _, chunk := range chunks[1:] {
-		b.SendMessage(ctx, &tg.SendMessageParams{
+		m, _ := b.SendMessage(ctx, &tg.SendMessageParams{
 			ChatID:          chatID,
 			MessageThreadID: topicID,
 			Text:            chunk,
 		})
+		if topicID == 0 {
+			topicHistory[chatID] = append(topicHistory[chatID], historyMessage{role: openai.ChatMessageRoleAssistant, content: chunk, messageID: m.ID})
+		}
+	}
+	if topicID == 0 {
+		pruneTopic0History(ctx, b, chatID)
 	}
 }
 
@@ -404,4 +446,19 @@ func splitMessage(text string, size int) []string {
 		runes = runes[end:]
 	}
 	return chunks
+}
+
+func pruneTopic0History(ctx context.Context, b *tg.Bot, chatID int64) {
+	hist := topicHistory[chatID]
+	if len(hist) <= historyLimit {
+		return
+	}
+	excess := len(hist) - historyLimit
+	for i := 0; i < excess; i++ {
+		h := hist[i]
+		if _, err := b.DeleteMessage(ctx, &tg.DeleteMessageParams{ChatID: chatID, MessageID: h.messageID}); err != nil {
+			logging.Ctx(ctx).Error().Err(err).Int("message_id", h.messageID).Msg("failed to delete message")
+		}
+	}
+	topicHistory[chatID] = hist[excess:]
 }
