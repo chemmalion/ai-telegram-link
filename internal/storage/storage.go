@@ -41,27 +41,26 @@ func Init(path string) error {
 	})
 }
 
-// SaveProject stores the encrypted API key under the given project name.
-func SaveProject(name, apiKeyEnc string) error {
+// SaveProject registers a project name without any associated API key.
+func SaveProject(name string) error {
 	return db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(bucketProjects))
-		return b.Put([]byte(name), []byte(apiKeyEnc))
+		return b.Put([]byte(name), []byte{})
 	})
 }
 
-// LoadProject returns the encrypted API key for the project.
-func LoadProject(name string) (string, error) {
-	var val []byte
+// ProjectExists checks if a project is present in the database.
+func ProjectExists(name string) (bool, error) {
+	var exists bool
 	err := db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(bucketProjects))
 		v := b.Get([]byte(name))
-		if v == nil {
-			return errors.New("project not found")
+		if v != nil {
+			exists = true
 		}
-		val = append([]byte(nil), v...)
 		return nil
 	})
-	return string(val), err
+	return exists, err
 }
 
 // SaveProjectModel stores the selected model for the given project.

@@ -5,7 +5,8 @@ This tool is implemented using ChatGPT.
 ## Prerequisites
 - Go 1.24+
 - Telegram Bot Token
-- Base64-encoded 32-byte encryption key for `MASTER_KEY`
+- ChatGPT API key
+- Base64-encoded 32-byte encryption key for `TBOT_MASTER_KEY`
 
 ```bash
 # generate a random 32-byte key:
@@ -26,8 +27,9 @@ cd telegram-chatgpt-bot
 Set environment variables:
 
 ```bash
-export BOT_TOKEN="123…"
-export MASTER_KEY="base64-32-bytes"
+export TBOT_TELEGRAM_KEY="123…"
+export TBOT_CHATGPT_KEY="sk-..."
+export TBOT_MASTER_KEY="base64-32-bytes"
 export TBOT_ALLOWED_USER_IDS="12345,67890"
 export LOG_LEVEL="info" # optional: debug, info, warn, error
 ```
@@ -48,10 +50,8 @@ go build -o tgptbot ./cmd/tgptbot
 
 ### In private chat with bot
 
-* `/authproject <name>`
-   → bot prompts you to send the OpenAI API key.
-
-* Send the key as plain text.
+* `/newproject <name>`
+  → register a new project.
 
 * `/setmodel <projectName>`
   → choose the ChatGPT model for a project (defaults to ChatGPT 5).
@@ -65,7 +65,7 @@ go build -o tgptbot ./cmd/tgptbot
 2. As group admin, `@YourBot /settopic projectName`  
     → links this thread to that project.
 
-3. Any plain message you send now will be forwarded to ChatGPT (GPT-5 by default) under that API key.
+3. Any plain message you send now will be forwarded to ChatGPT (GPT-5 by default) using the global API key.
 
 4. Bot replies in-thread.
 
@@ -76,7 +76,7 @@ go build -o tgptbot ./cmd/tgptbot
 When running on an EC2 instance the bot can read its credentials directly from
 AWS Secrets Manager instead of a local `.env` file. The helper script
 `start-compose.sh` retrieves a single secret containing the JSON keys
-`tbot-telegram-access-token`, `tbot-master-key` and `tbot-allowed-user-ids` and
+`tbot-telegram-access-token`, `tbot-master-key`, `tbot-chatgpt-key` and `tbot-allowed-user-ids` and
 starts the container using Docker Compose. Set the secret name via the
 environment variable `TBOT_SECRET_ID` and execute the script:
 
@@ -104,12 +104,13 @@ docker build -t tgptbot .
 2. Set the required environment variables before starting the container. When
 running on AWS EC2 you can pull them from a single AWS Secrets Manager secret
 that stores all values as JSON with keys `tbot-telegram-access-token`,
-`tbot-master-key` and `tbot-allowed-user-ids`:
+`tbot-master-key`, `tbot-chatgpt-key` and `tbot-allowed-user-ids`:
 
 ```bash
 SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id my-tbot-secret --query SecretString --output text)
-export BOT_TOKEN=$(echo "$SECRET_JSON" | jq -r '."tbot-telegram-access-token"')
-export MASTER_KEY=$(echo "$SECRET_JSON" | jq -r '."tbot-master-key"')
+export TBOT_TELEGRAM_KEY=$(echo "$SECRET_JSON" | jq -r '."tbot-telegram-access-token"')
+export TBOT_MASTER_KEY=$(echo "$SECRET_JSON" | jq -r '."tbot-master-key"')
+export TBOT_CHATGPT_KEY=$(echo "$SECRET_JSON" | jq -r '."tbot-chatgpt-key"')
 export TBOT_ALLOWED_USER_IDS=$(echo "$SECRET_JSON" | jq -r '."tbot-allowed-user-ids"')
 ```
 
@@ -119,7 +120,7 @@ manually provide the values.
 3. Run the container with a persistent data directory:
 
 ```bash
-docker run -e BOT_TOKEN -e MASTER_KEY -e TBOT_ALLOWED_USER_IDS -v $(pwd)/data:/data tgptbot
+docker run -e TBOT_TELEGRAM_KEY -e TBOT_MASTER_KEY -e TBOT_CHATGPT_KEY -e TBOT_ALLOWED_USER_IDS -v $(pwd)/data:/data tgptbot
 ```
 
 Alternatively start it with Docker Compose, which will inherit the environment

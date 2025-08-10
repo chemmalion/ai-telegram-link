@@ -11,7 +11,6 @@ import (
 	"github.com/go-telegram/bot/models"
 	openai "github.com/sashabaranov/go-openai"
 
-	"telegram-chatgpt-bot/internal/crypt"
 	"telegram-chatgpt-bot/internal/logging"
 	"telegram-chatgpt-bot/internal/storage"
 )
@@ -22,14 +21,18 @@ const (
 )
 
 var (
-	pendingAuth  = map[int64]string{}
 	pendingRule  = map[int64]string{}
 	allowedUsers map[int64]bool
+	chatGPTKey   string
 )
 
 // Init parses the allowed user ids from the environment.
 func Init() {
 	parseAllowedUsers()
+	chatGPTKey = os.Getenv("TBOT_CHATGPT_KEY")
+	if chatGPTKey == "" {
+		logging.Log.Fatal().Msg("TBOT_CHATGPT_KEY env var is required")
+	}
 }
 
 func parseAllowedUsers() {
@@ -102,15 +105,17 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 	// Command handlers
 	if cmd, args, ok := parseCommand(msg); ok {
 		switch cmd {
-		case "authproject":
+		case "newproject":
 			if args == "" {
-				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /authproject <projectName>"})
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /newproject <projectName>"})
 				return
 			}
-			prompt := fmt.Sprintf("Please send me the OpenAI API key for project '%s' now.", args)
-			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: prompt})
-			pendingAuth[msg.From.ID] = args
-			log.Info().Str("event", "authorization_request").Str("project", args).Msg("authorization requested")
+			if err := storage.SaveProject(args); err != nil {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Save failed: " + err.Error()})
+				return
+			}
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Project '" + args + "' registered."})
+			log.Info().Str("event", "new_project").Str("project", args).Msg("project registered")
 			return
 
 		case "settopic":
@@ -123,7 +128,7 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /settopic <projectName>"})
 				return
 			}
-			if _, err := storage.LoadProject(proj); err != nil {
+			if exists, err := storage.ProjectExists(proj); err != nil || !exists {
 				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Project not found."})
 				return
 			}
@@ -154,17 +159,11 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /setmodel <projectName>"})
 				return
 			}
-			encKey, err := storage.LoadProject(proj)
-			if err != nil {
+			if exists, err := storage.ProjectExists(proj); err != nil || !exists {
 				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Project not found."})
 				return
 			}
-			apiKey, err := crypt.Decrypt(encKey)
-			if err != nil {
-				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Decrypt error: " + err.Error()})
-				return
-			}
-			client := openai.NewClient(apiKey)
+			client := openai.NewClient(chatGPTKey)
 			modelsList, err := client.ListModels(context.Background())
 			var names []string
 			if err != nil {
@@ -199,7 +198,7 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /setrule <projectName>"})
 				return
 			}
-			if _, err := storage.LoadProject(proj); err != nil {
+			if exists, err := storage.ProjectExists(proj); err != nil || !exists {
 				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Project not found."})
 				return
 			}
@@ -229,23 +228,6 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 		}
 	}
 
-	if pendingProject, ok := pendingAuth[msg.From.ID]; ok && msg.Text != "" {
-		key := strings.TrimSpace(msg.Text)
-		enc, err := crypt.Encrypt(key)
-		delete(pendingAuth, msg.From.ID)
-		if err != nil {
-			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Encryption error: " + err.Error()})
-			return
-		}
-		if err := storage.SaveProject(pendingProject, enc); err != nil {
-			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Save error: " + err.Error()})
-			return
-		}
-		b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Project '" + pendingProject + "' saved."})
-		log.Info().Str("event", "authorization_attempt").Str("project", pendingProject).Msg("api key saved")
-		return
-	}
-
 	if proj, ok := pendingRule[msg.From.ID]; ok && msg.Text != "" {
 		instr := strings.TrimSpace(msg.Text)
 		delete(pendingRule, msg.From.ID)
@@ -262,12 +244,6 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 	if err != nil {
 		return
 	}
-	encKey, _ := storage.LoadProject(proj)
-	apiKey, err := crypt.Decrypt(encKey)
-	if err != nil {
-		logging.Ctx(ctx).Error().Err(err).Msg("decrypt error")
-		return
-	}
 	model, err := storage.LoadProjectModel(proj)
 	if err != nil || model == "" {
 		model = defaultModel
@@ -278,7 +254,7 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 		messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleSystem, Content: instr})
 	}
 	messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: msg.Text})
-	client := openai.NewClient(apiKey)
+	client := openai.NewClient(chatGPTKey)
 	log.Info().Str("event", "chatgpt_request").Str("project", proj).Str("model", model).Str("snippet", logging.Snippet(msg.Text, 30)).Msg("sending to ChatGPT")
 	resp, err := client.CreateChatCompletion(
 		context.Background(),
