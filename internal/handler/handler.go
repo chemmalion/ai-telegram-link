@@ -196,10 +196,10 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: fmt.Sprintf("For project '%s' history limit is %d and there are %d stored messages.", proj, limit, count)})
 			return
 
-		case "history-messages":
+		case "historymessages":
 			proj := args
 			if proj == "" {
-				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /history-messages <projectName>"})
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /historymessages <projectName>"})
 				return
 			}
 			if exists, err := storage.ProjectExists(proj); err != nil || !exists {
@@ -224,10 +224,10 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: out})
 			return
 
-		case "set-history-limit":
+		case "sethistorylimit":
 			proj := args
 			if proj == "" {
-				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /set-history-limit <projectName>"})
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /sethistorylimit <projectName>"})
 				return
 			}
 			if exists, err := storage.ProjectExists(proj); err != nil || !exists {
@@ -239,10 +239,10 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 			log.Info().Str("event", "history_limit_request").Str("project", proj).Msg("history limit requested")
 			return
 
-		case "clear-history":
+		case "clearhistory":
 			proj := args
 			if proj == "" {
-				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /clear-history <projectName>"})
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /clearhistory <projectName>"})
 				return
 			}
 			if exists, err := storage.ProjectExists(proj); err != nil || !exists {
