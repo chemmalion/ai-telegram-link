@@ -10,6 +10,7 @@ TBOT_MASTER_KEY=$(jq -r '."tbot-master-key"' <<<"$SECRET_JSON")
 TBOT_CHATGPT_KEY=$(jq -r '."tbot-chatgpt-key"' <<<"$SECRET_JSON")
 TBOT_ALLOWED_USER_IDS=$(jq -r '."tbot-allowed-user-ids"' <<<"$SECRET_JSON")
 
-export TBOT_TELEGRAM_KEY TBOT_MASTER_KEY TBOT_CHATGPT_KEY TBOT_ALLOWED_USER_IDS
-exec docker compose up -d
+TBOT_HISTORY_LIMIT=10
 
+export TBOT_TELEGRAM_KEY TBOT_MASTER_KEY TBOT_CHATGPT_KEY TBOT_ALLOWED_USER_IDS TBOT_HISTORY_LIMIT
+exec docker compose up -d
