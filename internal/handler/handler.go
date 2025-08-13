@@ -10,7 +10,9 @@ import (
 
 	tg "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
-	openai "github.com/sashabaranov/go-openai"
+	openai "github.com/openai/openai-go/v2"
+	"github.com/openai/openai-go/v2/option"
+	"github.com/openai/openai-go/v2/responses"
 
 	"telegram-chatgpt-bot/internal/logging"
 	"telegram-chatgpt-bot/internal/storage"
@@ -18,7 +20,7 @@ import (
 
 const (
 	defaultModel  = "gpt-5"
-	fallbackModel = openai.GPT3Dot5Turbo
+	fallbackModel = openai.ChatModelGPT3_5Turbo
 )
 
 var (
@@ -333,9 +335,9 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 		model = defaultModel
 	}
 	instr, _ := storage.LoadProjectInstruction(proj)
-	messages := []openai.ChatCompletionMessage{}
+	inputs := responses.ResponseInputParam{}
 	if instr != "" {
-		messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleSystem, Content: instr})
+		inputs = append(inputs, responses.ResponseInputItemParamOfMessage(instr, responses.EasyInputMessageRoleSystem))
 	}
 	limit, _ := storage.LoadHistoryLimit(proj)
 	hist, _ := storage.LoadProjectHistory(proj)
@@ -346,7 +348,7 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 			}
 			when := time.Unix(h.When, 0).Format("2006-01-02 15:04:05")
 			prefix := fmt.Sprintf("%s %s:\n", when, h.WhoName)
-			messages = append(messages, openai.ChatCompletionMessage{Role: h.Role, Content: prefix + h.Content, Name: chatName(h.WhoName)})
+			inputs = append(inputs, responses.ResponseInputItemParamOfMessage(prefix+h.Content, responses.EasyInputMessageRole(h.Role)))
 		}
 	}
 	userName := msg.From.Username
@@ -358,8 +360,8 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 	if text != "" {
 		meta += "\n" + text
 	}
-	var parts []openai.ChatMessagePart
-	parts = append(parts, openai.ChatMessagePart{Type: openai.ChatMessagePartTypeText, Text: meta})
+	var parts responses.ResponseInputMessageContentListParam
+	parts = append(parts, responses.ResponseInputContentParamOfInputText(meta))
 	if len(msg.Photo) > 0 {
 		fileID := msg.Photo[len(msg.Photo)-1].FileID
 		file, err := b.GetFile(ctx, &tg.GetFileParams{FileID: fileID})
@@ -367,18 +369,19 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 			log.Error().Err(err).Msg("failed to get file")
 		} else {
 			url := b.FileDownloadLink(file)
-			parts = append(parts, openai.ChatMessagePart{
-				Type:     openai.ChatMessagePartTypeImageURL,
-				ImageURL: &openai.ChatMessageImageURL{URL: url},
-			})
+			img := responses.ResponseInputImageParam{
+				Detail:   responses.ResponseInputImageDetailAuto,
+				ImageURL: openai.String(url),
+			}
+			parts = append(parts, responses.ResponseInputContentUnionParam{OfInputImage: &img})
 		}
 	}
-	messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, MultiContent: parts, Name: chatName(userName)})
+	inputs = append(inputs, responses.ResponseInputItemParamOfMessage(parts, responses.EasyInputMessageRoleUser))
 	if limit > 0 {
 		whenUnix := now.Unix()
 		if text != "" {
 			storage.AddHistoryMessage(proj, storage.HistoryMessage{
-				Role:    openai.ChatMessageRoleUser,
+				Role:    string(responses.EasyInputMessageRoleUser),
 				WhoID:   msg.From.ID,
 				WhoName: userName,
 				When:    whenUnix,
@@ -387,7 +390,7 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 		}
 		if len(msg.Photo) > 0 {
 			storage.AddHistoryMessage(proj, storage.HistoryMessage{
-				Role:    openai.ChatMessageRoleUser,
+				Role:    string(responses.EasyInputMessageRoleUser),
 				WhoID:   msg.From.ID,
 				WhoName: userName,
 				When:    whenUnix,
@@ -395,7 +398,7 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 			})
 		}
 	}
-	client := openai.NewClient(chatGPTKey)
+	client := openai.NewClient(option.WithAPIKey(chatGPTKey))
 	log.Info().Str("event", "chatgpt_request").Str("project", proj).Str("model", model).Str("snippet", logging.Snippet(text, 30)).Msg("sending to ChatGPT")
 
 	// send initial progress message and keep its ID for further edits
@@ -414,27 +417,20 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 
 	// run ChatGPT request asynchronously
 	go func() {
-		resp, err := client.CreateChatCompletion(
-			context.Background(),
-			openai.ChatCompletionRequest{
-				Model:    model,
-				Messages: messages,
-			},
-		)
+		params := responses.ResponseNewParams{
+			Model: openai.ResponsesModel(model),
+			Input: responses.ResponseNewParamsInputUnion{OfInputItemList: inputs},
+		}
+		resp, err := client.Responses.New(context.Background(), params)
 		if err != nil && model == defaultModel {
-			resp, err = client.CreateChatCompletion(
-				context.Background(),
-				openai.ChatCompletionRequest{
-					Model:    fallbackModel,
-					Messages: messages,
-				},
-			)
+			params.Model = openai.ResponsesModel(fallbackModel)
+			resp, err = client.Responses.New(context.Background(), params)
 		}
 		if err != nil {
 			resultCh <- gptResult{reply: "OpenAI error: " + err.Error(), err: err}
 			return
 		}
-		resultCh <- gptResult{reply: resp.Choices[0].Message.Content}
+		resultCh <- gptResult{reply: resp.OutputText()}
 	}()
 
 	ticker := time.NewTicker(10 * time.Second)
@@ -467,7 +463,7 @@ done:
 		})
 		if limit > 0 {
 			storage.AddHistoryMessage(proj, storage.HistoryMessage{
-				Role:    openai.ChatMessageRoleAssistant,
+				Role:    string(responses.EasyInputMessageRoleAssistant),
 				WhoID:   0,
 				WhoName: "ChatGPT " + model,
 				When:    time.Now().Unix(),
@@ -501,7 +497,7 @@ done:
 	}
 	if limit > 0 {
 		storage.AddHistoryMessage(proj, storage.HistoryMessage{
-			Role:    openai.ChatMessageRoleAssistant,
+			Role:    string(responses.EasyInputMessageRoleAssistant),
 			WhoID:   0,
 			WhoName: "ChatGPT " + model,
 			When:    time.Now().Unix(),
