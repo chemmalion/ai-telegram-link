@@ -62,6 +62,24 @@ go build -o tgptbot ./cmd/tgptbot
 * `/showrule <projectName>`
   → display the current instruction for a project.
 
+* `/websearch <projectName>`
+  → show the current web search setting for a project.
+
+* `/setwebsearch <projectName>`
+  → configure web search context size for a project.
+
+* `/reasoning <projectName>`
+  → display reasoning effort used for a project.
+
+* `/setreasoning <projectName>`
+  → change reasoning effort for a project.
+
+* `/transcribe <projectName>`
+  → show audio transcription setting for a project.
+
+* `/settranscribe <projectName>`
+  → enable or disable audio transcription for a project.
+
 * `/history <projectName>`
   → show current history limit and stored message count.
 

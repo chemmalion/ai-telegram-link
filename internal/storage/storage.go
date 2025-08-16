@@ -20,6 +20,9 @@ const (
 	bucketRules         = "rules"          // key: projectName, value: custom instruction
 	bucketHistoryLimits = "history_limits" // key: projectName, value: limit
 	bucketHistory       = "history"        // parent bucket for per-project history
+	bucketWebSearch     = "websearch"      // key: projectName, value: search context size or off
+	bucketReasoning     = "reasoning"      // key: projectName, value: reasoning effort
+	bucketTranscribe    = "transcribe"     // key: projectName, value: on/off
 )
 
 // Init opens the database file and creates buckets if needed.
@@ -46,6 +49,15 @@ func Init(path string) error {
 			return err
 		}
 		if _, err := tx.CreateBucketIfNotExists([]byte(bucketHistory)); err != nil {
+			return err
+		}
+		if _, err := tx.CreateBucketIfNotExists([]byte(bucketWebSearch)); err != nil {
+			return err
+		}
+		if _, err := tx.CreateBucketIfNotExists([]byte(bucketReasoning)); err != nil {
+			return err
+		}
+		if _, err := tx.CreateBucketIfNotExists([]byte(bucketTranscribe)); err != nil {
 			return err
 		}
 		return nil
@@ -95,6 +107,90 @@ func LoadProjectModel(name string) (string, error) {
 		return nil
 	})
 	return string(val), err
+}
+
+// SaveProjectWebSearch stores web search setting for a project.
+func SaveProjectWebSearch(name, setting string) error {
+	return db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucketWebSearch))
+		return b.Put([]byte(name), []byte(setting))
+	})
+}
+
+// LoadProjectWebSearch returns web search setting for a project. Default is "off".
+func LoadProjectWebSearch(name string) (string, error) {
+	var val []byte
+	err := db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucketWebSearch))
+		v := b.Get([]byte(name))
+		if v != nil {
+			val = append([]byte(nil), v...)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(val) == 0 {
+		return "off", nil
+	}
+	return string(val), nil
+}
+
+// SaveProjectReasoning stores reasoning effort for a project.
+func SaveProjectReasoning(name, effort string) error {
+	return db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucketReasoning))
+		return b.Put([]byte(name), []byte(effort))
+	})
+}
+
+// LoadProjectReasoning returns reasoning effort for a project. Default is "medium".
+func LoadProjectReasoning(name string) (string, error) {
+	var val []byte
+	err := db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucketReasoning))
+		v := b.Get([]byte(name))
+		if v != nil {
+			val = append([]byte(nil), v...)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(val) == 0 {
+		return "medium", nil
+	}
+	return string(val), nil
+}
+
+// SaveProjectTranscribe stores audio transcription setting for a project.
+func SaveProjectTranscribe(name, setting string) error {
+	return db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucketTranscribe))
+		return b.Put([]byte(name), []byte(setting))
+	})
+}
+
+// LoadProjectTranscribe returns audio transcription setting. Default is "off".
+func LoadProjectTranscribe(name string) (string, error) {
+	var val []byte
+	err := db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucketTranscribe))
+		v := b.Get([]byte(name))
+		if v != nil {
+			val = append([]byte(nil), v...)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(val) == 0 {
+		return "off", nil
+	}
+	return string(val), nil
 }
 
 // SaveProjectInstruction stores the custom instruction for the project.
