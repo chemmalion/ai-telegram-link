@@ -12,7 +12,9 @@ import (
 	"github.com/go-telegram/bot/models"
 	openai "github.com/openai/openai-go/v2"
 	"github.com/openai/openai-go/v2/option"
+	"github.com/openai/openai-go/v2/packages/param"
 	"github.com/openai/openai-go/v2/responses"
+	"github.com/openai/openai-go/v2/shared/constant"
 
 	"telegram-chatgpt-bot/internal/logging"
 	"telegram-chatgpt-bot/internal/storage"
@@ -420,6 +422,20 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 		params := responses.ResponseNewParams{
 			Model: openai.ResponsesModel(model),
 			Input: responses.ResponseNewParamsInputUnion{OfInputItemList: inputs},
+			Tools: []responses.ToolUnionParam{
+				{
+					OfWebSearchPreview: &responses.WebSearchToolParam{
+						Type:              responses.WebSearchToolTypeWebSearchPreview,
+						SearchContextSize: responses.WebSearchToolSearchContextSizeHigh,
+						UserLocation: responses.WebSearchToolUserLocationParam{
+							City:     param.NewOpt("Oulu"),
+							Country:  param.NewOpt("FI"),
+							Timezone: param.NewOpt("Europe/Helsinki"),
+							Type:     constant.ValueOf[constant.Approximate](),
+						},
+					},
+				},
+			},
 		}
 		resp, err := client.Responses.New(context.Background(), params)
 		if err != nil && model == defaultModel {
