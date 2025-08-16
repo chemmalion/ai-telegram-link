@@ -22,8 +22,7 @@ import (
 )
 
 const (
-	defaultModel  = "gpt-5"
-	fallbackModel = openai.ChatModelGPT3_5Turbo
+	defaultModel = "gpt-5"
 )
 
 var (
@@ -534,15 +533,24 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 			}
 		}
 	}
-	meta := fmt.Sprintf("%s %s:", now.Format("2006-01-02 15:04:05"), userName)
-	if text != "" {
-		meta += "\n" + text
-	}
-	if transcribed != "" {
-		meta += "\n(Audio transcription)\n" + transcribed
-	}
 	var parts responses.ResponseInputMessageContentListParam
-	parts = append(parts, responses.ResponseInputContentParamOfInputText(meta))
+	if limit > 0 {
+		meta := fmt.Sprintf("%s %s:", now.Format("2006-01-02 15:04:05"), userName)
+		if text != "" {
+			meta += "\n" + text
+		}
+		if transcribed != "" {
+			meta += "\n(Audio transcription)\n" + transcribed
+		}
+		parts = append(parts, responses.ResponseInputContentParamOfInputText(meta))
+	} else {
+		if text != "" {
+			parts = append(parts, responses.ResponseInputContentParamOfInputText(text))
+		}
+		if transcribed != "" {
+			parts = append(parts, responses.ResponseInputContentParamOfInputText("(Audio transcription)\n"+transcribed))
+		}
+	}
 	if len(msg.Photo) > 0 {
 		fileID := msg.Photo[len(msg.Photo)-1].FileID
 		file, err := b.GetFile(ctx, &tg.GetFileParams{FileID: fileID})
@@ -637,10 +645,6 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 			Reasoning: openai.ReasoningParam{Effort: reasoningEffortToConst(reasoningEffort)},
 		}
 		resp, err := client.Responses.New(context.Background(), params)
-		if err != nil && model == defaultModel {
-			params.Model = openai.ResponsesModel(fallbackModel)
-			resp, err = client.Responses.New(context.Background(), params)
-		}
 		if err != nil {
 			resultCh <- gptResult{reply: "OpenAI error: " + err.Error(), err: err}
 			return
