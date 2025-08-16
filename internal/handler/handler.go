@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -26,12 +27,15 @@ const (
 )
 
 var (
-	pendingRule      = map[int64]string{}
-	pendingModel     = map[int64]string{}
-	pendingHistLimit = map[int64]string{}
-	pendingClearHist = map[int64]string{}
-	allowedUsers     map[int64]bool
-	chatGPTKey       string
+	pendingRule       = map[int64]string{}
+	pendingModel      = map[int64]string{}
+	pendingHistLimit  = map[int64]string{}
+	pendingClearHist  = map[int64]string{}
+	pendingWebSearch  = map[int64]string{}
+	pendingReasoning  = map[int64]string{}
+	pendingTranscribe = map[int64]string{}
+	allowedUsers      map[int64]bool
+	chatGPTKey        string
 )
 
 // Init parses the allowed user ids from the environment.
@@ -185,6 +189,93 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 			}
 			return
 
+		case "websearch":
+			proj := args
+			if proj == "" {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /websearch <projectName>"})
+				return
+			}
+			if exists, err := storage.ProjectExists(proj); err != nil || !exists {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Project not found."})
+				return
+			}
+			setting, _ := storage.LoadProjectWebSearch(proj)
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: fmt.Sprintf("Web search for project '%s' is %s.", proj, setting)})
+			return
+
+		case "setwebsearch":
+			proj := args
+			if proj == "" {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /setwebsearch <projectName>"})
+				return
+			}
+			if exists, err := storage.ProjectExists(proj); err != nil || !exists {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Project not found."})
+				return
+			}
+			pendingWebSearch[msg.From.ID] = proj
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Enter web search setting (high, medium, low, off)."})
+			log.Info().Str("event", "websearch_request").Str("project", proj).Msg("websearch requested")
+			return
+
+		case "reasoning":
+			proj := args
+			if proj == "" {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /reasoning <projectName>"})
+				return
+			}
+			if exists, err := storage.ProjectExists(proj); err != nil || !exists {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Project not found."})
+				return
+			}
+			effort, _ := storage.LoadProjectReasoning(proj)
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: fmt.Sprintf("Reasoning effort for project '%s' is %s.", proj, effort)})
+			return
+
+		case "setreasoning":
+			proj := args
+			if proj == "" {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /setreasoning <projectName>"})
+				return
+			}
+			if exists, err := storage.ProjectExists(proj); err != nil || !exists {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Project not found."})
+				return
+			}
+			pendingReasoning[msg.From.ID] = proj
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Enter reasoning effort (minimal, low, medium, high)."})
+			log.Info().Str("event", "reasoning_request").Str("project", proj).Msg("reasoning requested")
+			return
+
+		case "transcribe":
+			proj := args
+			if proj == "" {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /transcribe <projectName>"})
+				return
+			}
+			if exists, err := storage.ProjectExists(proj); err != nil || !exists {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Project not found."})
+				return
+			}
+			setting, _ := storage.LoadProjectTranscribe(proj)
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: fmt.Sprintf("Audio transcription for project '%s' is %s.", proj, setting)})
+			return
+
+		case "settranscribe":
+			proj := args
+			if proj == "" {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /settranscribe <projectName>"})
+				return
+			}
+			if exists, err := storage.ProjectExists(proj); err != nil || !exists {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Project not found."})
+				return
+			}
+			pendingTranscribe[msg.From.ID] = proj
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Enable audio transcription? (on, off)"})
+			log.Info().Str("event", "transcribe_request").Str("project", proj).Msg("transcribe requested")
+			return
+
 		case "history":
 			proj := args
 			if proj == "" {
@@ -290,6 +381,57 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 		return
 	}
 
+	if proj, ok := pendingWebSearch[msg.From.ID]; ok && msg.Text != "" {
+		val := strings.ToLower(strings.TrimSpace(msg.Text))
+		delete(pendingWebSearch, msg.From.ID)
+		switch val {
+		case "high", "medium", "low", "off":
+			if err := storage.SaveProjectWebSearch(proj, val); err != nil {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Save error: " + err.Error()})
+				return
+			}
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: fmt.Sprintf("Web search for project '%s' set to %s.", proj, val)})
+			log.Info().Str("event", "set_websearch").Str("project", proj).Str("setting", val).Msg("websearch set")
+		default:
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Please enter one of: high, medium, low, off."})
+		}
+		return
+	}
+
+	if proj, ok := pendingReasoning[msg.From.ID]; ok && msg.Text != "" {
+		val := strings.ToLower(strings.TrimSpace(msg.Text))
+		delete(pendingReasoning, msg.From.ID)
+		switch val {
+		case "minimal", "low", "medium", "high":
+			if err := storage.SaveProjectReasoning(proj, val); err != nil {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Save error: " + err.Error()})
+				return
+			}
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: fmt.Sprintf("Reasoning effort for project '%s' set to %s.", proj, val)})
+			log.Info().Str("event", "set_reasoning").Str("project", proj).Str("effort", val).Msg("reasoning set")
+		default:
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Please enter one of: minimal, low, medium, high."})
+		}
+		return
+	}
+
+	if proj, ok := pendingTranscribe[msg.From.ID]; ok && msg.Text != "" {
+		val := strings.ToLower(strings.TrimSpace(msg.Text))
+		delete(pendingTranscribe, msg.From.ID)
+		switch val {
+		case "on", "off":
+			if err := storage.SaveProjectTranscribe(proj, val); err != nil {
+				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Save error: " + err.Error()})
+				return
+			}
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: fmt.Sprintf("Audio transcription for project '%s' set to %s.", proj, val)})
+			log.Info().Str("event", "set_transcribe").Str("project", proj).Str("setting", val).Msg("transcribe set")
+		default:
+			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Please enter one of: on, off."})
+		}
+		return
+	}
+
 	if proj, ok := pendingHistLimit[msg.From.ID]; ok && msg.Text != "" {
 		limitStr := strings.TrimSpace(msg.Text)
 		delete(pendingHistLimit, msg.From.ID)
@@ -324,7 +466,7 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 		return
 	}
 
-	if text == "" && len(msg.Photo) == 0 {
+	if text == "" && len(msg.Photo) == 0 && msg.Voice == nil && msg.Audio == nil {
 		return
 	}
 
@@ -343,6 +485,10 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 	}
 	limit, _ := storage.LoadHistoryLimit(proj)
 	hist, _ := storage.LoadProjectHistory(proj)
+	webSearchSetting, _ := storage.LoadProjectWebSearch(proj)
+	reasoningEffort, _ := storage.LoadProjectReasoning(proj)
+	transcribeSetting, _ := storage.LoadProjectTranscribe(proj)
+	client := openai.NewClient(option.WithAPIKey(chatGPTKey))
 	if limit > 0 && len(hist) > 0 {
 		for _, h := range hist {
 			if h.Content == "" {
@@ -358,9 +504,42 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 		userName = msg.From.FirstName
 	}
 	now := time.Now()
+	var transcribed string
+	if transcribeSetting == "on" && (msg.Voice != nil || msg.Audio != nil) {
+		fileID := ""
+		if msg.Voice != nil {
+			fileID = msg.Voice.FileID
+		} else if msg.Audio != nil {
+			fileID = msg.Audio.FileID
+		}
+		file, err := b.GetFile(ctx, &tg.GetFileParams{FileID: fileID})
+		if err != nil {
+			log.Error().Err(err).Msg("failed to get audio file")
+		} else {
+			url := b.FileDownloadLink(file)
+			resp, err := http.Get(url)
+			if err == nil {
+				defer resp.Body.Close()
+				tResp, err := client.Audio.Transcriptions.New(context.Background(), openai.AudioTranscriptionNewParams{
+					File:  resp.Body,
+					Model: openai.AudioModelWhisper1,
+				})
+				if err != nil {
+					log.Error().Err(err).Msg("transcription failed")
+				} else {
+					transcribed = tResp.Text
+				}
+			} else {
+				log.Error().Err(err).Msg("failed to download audio")
+			}
+		}
+	}
 	meta := fmt.Sprintf("%s %s:", now.Format("2006-01-02 15:04:05"), userName)
 	if text != "" {
 		meta += "\n" + text
+	}
+	if transcribed != "" {
+		meta += "\n(Audio transcription)\n" + transcribed
 	}
 	var parts responses.ResponseInputMessageContentListParam
 	parts = append(parts, responses.ResponseInputContentParamOfInputText(meta))
@@ -390,6 +569,15 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 				Content: text,
 			})
 		}
+		if transcribed != "" {
+			storage.AddHistoryMessage(proj, storage.HistoryMessage{
+				Role:    string(responses.EasyInputMessageRoleUser),
+				WhoID:   msg.From.ID,
+				WhoName: userName,
+				When:    whenUnix,
+				Content: "(Transcribed audio) " + transcribed,
+			})
+		}
 		if len(msg.Photo) > 0 {
 			storage.AddHistoryMessage(proj, storage.HistoryMessage{
 				Role:    string(responses.EasyInputMessageRoleUser),
@@ -400,7 +588,6 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 			})
 		}
 	}
-	client := openai.NewClient(option.WithAPIKey(chatGPTKey))
 	log.Info().Str("event", "chatgpt_request").Str("project", proj).Str("model", model).Str("snippet", logging.Snippet(text, 30)).Msg("sending to ChatGPT")
 
 	// send initial progress message and keep its ID for further edits
@@ -419,23 +606,35 @@ func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
 
 	// run ChatGPT request asynchronously
 	go func() {
-		params := responses.ResponseNewParams{
-			Model: openai.ResponsesModel(model),
-			Input: responses.ResponseNewParamsInputUnion{OfInputItemList: inputs},
-			Tools: []responses.ToolUnionParam{
-				{
-					OfWebSearchPreview: &responses.WebSearchToolParam{
-						Type:              responses.WebSearchToolTypeWebSearchPreview,
-						SearchContextSize: responses.WebSearchToolSearchContextSizeHigh,
-						UserLocation: responses.WebSearchToolUserLocationParam{
-							City:     param.NewOpt("Oulu"),
-							Country:  param.NewOpt("FI"),
-							Timezone: param.NewOpt("Europe/Helsinki"),
-							Type:     constant.ValueOf[constant.Approximate](),
-						},
+		var tools []responses.ToolUnionParam
+		if webSearchSetting != "off" {
+			size := responses.WebSearchToolSearchContextSizeHigh
+			switch webSearchSetting {
+			case "medium":
+				size = responses.WebSearchToolSearchContextSizeMedium
+			case "low":
+				size = responses.WebSearchToolSearchContextSizeLow
+			case "high":
+				size = responses.WebSearchToolSearchContextSizeHigh
+			}
+			tools = append(tools, responses.ToolUnionParam{
+				OfWebSearchPreview: &responses.WebSearchToolParam{
+					Type:              responses.WebSearchToolTypeWebSearchPreview,
+					SearchContextSize: size,
+					UserLocation: responses.WebSearchToolUserLocationParam{
+						City:     param.NewOpt("Oulu"),
+						Country:  param.NewOpt("FI"),
+						Timezone: param.NewOpt("Europe/Helsinki"),
+						Type:     constant.ValueOf[constant.Approximate](),
 					},
 				},
-			},
+			})
+		}
+		params := responses.ResponseNewParams{
+			Model:     openai.ResponsesModel(model),
+			Input:     responses.ResponseNewParamsInputUnion{OfInputItemList: inputs},
+			Tools:     tools,
+			Reasoning: openai.ReasoningParam{Effort: reasoningEffortToConst(reasoningEffort)},
 		}
 		resp, err := client.Responses.New(context.Background(), params)
 		if err != nil && model == defaultModel {
@@ -569,4 +768,17 @@ func chatName(name string) string {
 		name = name[:64]
 	}
 	return name
+}
+
+func reasoningEffortToConst(val string) openai.ReasoningEffort {
+	switch val {
+	case "minimal":
+		return openai.ReasoningEffortMinimal
+	case "low":
+		return openai.ReasoningEffortLow
+	case "high":
+		return openai.ReasoningEffortHigh
+	default:
+		return openai.ReasoningEffortMedium
+	}
 }
