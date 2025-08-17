@@ -66,8 +66,16 @@ func parseAllowedUsers() {
 	}
 }
 
+// Bot wraps the telegram bot methods used by the handler.
+type Bot interface {
+	SendMessage(ctx context.Context, params *tg.SendMessageParams) (*models.Message, error)
+	GetFile(ctx context.Context, params *tg.GetFileParams) (*models.File, error)
+	FileDownloadLink(file *models.File) string
+	EditMessageText(ctx context.Context, params *tg.EditMessageTextParams) (*models.Message, error)
+}
+
 // HandleUpdate processes a Telegram update.
-func HandleUpdate(ctx context.Context, b *tg.Bot, upd *models.Update) {
+func HandleUpdate(ctx context.Context, b Bot, upd *models.Update) {
 	ctx = logging.Context(ctx)
 
 	if upd.CallbackQuery != nil {

@@ -6,6 +6,7 @@ import (
 	"os/signal"
 
 	tg "github.com/go-telegram/bot"
+	"github.com/go-telegram/bot/models"
 
 	"telegram-chatgpt-bot/internal/crypt"
 	"telegram-chatgpt-bot/internal/handler"
@@ -31,7 +32,9 @@ func Run() {
 		logging.Log.Fatal().Msg("TBOT_TELEGRAM_KEY env var is required")
 	}
 
-	b, err := tg.New(botToken, tg.WithDefaultHandler(handler.HandleUpdate))
+	b, err := tg.New(botToken, tg.WithDefaultHandler(func(ctx context.Context, b *tg.Bot, upd *models.Update) {
+		handler.HandleUpdate(ctx, b, upd)
+	}))
 	if err != nil {
 		logging.Log.Fatal().Err(err).Msg("failed to create bot")
 	}
