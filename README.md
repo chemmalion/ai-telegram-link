@@ -1,6 +1,6 @@
 # Telegram–ChatGPT Bot in Go
 
-[![Tests](https://github.com/OWNER/ai-telegram-link/actions/workflows/test.yml/badge.svg)](https://github.com/OWNER/ai-telegram-link/actions/workflows/test.yml)
+[![Tests](https://github.com/chemmalion/ai-telegram-link/actions/workflows/test.yml/badge.svg)](https://github.com/chemmalion/ai-telegram-link/actions/workflows/test.yml)
 
 This tool is implemented using ChatGPT.
 
