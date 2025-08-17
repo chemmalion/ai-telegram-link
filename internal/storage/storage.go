@@ -64,6 +64,16 @@ func Init(path string) error {
 	})
 }
 
+// Close releases the underlying database. Primarily used in tests.
+func Close() error {
+	if db == nil {
+		return nil
+	}
+	err := db.Close()
+	db = nil
+	return err
+}
+
 // SaveProject registers a project name without any associated API key.
 func SaveProject(name string) error {
 	return db.Update(func(tx *bolt.Tx) error {

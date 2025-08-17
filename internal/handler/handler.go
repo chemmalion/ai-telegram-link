@@ -35,6 +35,12 @@ var (
 	pendingTranscribe = map[int64]string{}
 	allowedUsers      map[int64]bool
 	chatGPTKey        string
+
+	// wrappers around storage functions for easier testing
+	saveProject   = storage.SaveProject
+	projectExists = storage.ProjectExists
+	mapTopic      = storage.MapTopic
+	unmapTopic    = storage.UnmapTopic
 )
 
 // Init parses the allowed user ids from the environment.
@@ -113,7 +119,7 @@ func HandleUpdate(ctx context.Context, b Bot, upd *models.Update) {
 				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /newproject <projectName>"})
 				return
 			}
-			if err := storage.SaveProject(args); err != nil {
+			if err := saveProject(args); err != nil {
 				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Save failed: " + err.Error()})
 				return
 			}
@@ -127,11 +133,11 @@ func HandleUpdate(ctx context.Context, b Bot, upd *models.Update) {
 				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Usage: /settopic <projectName>"})
 				return
 			}
-			if exists, err := storage.ProjectExists(proj); err != nil || !exists {
+			if exists, err := projectExists(proj); err != nil || !exists {
 				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Project not found."})
 				return
 			}
-			if err := storage.MapTopic(chatID, topicID, proj); err != nil {
+			if err := mapTopic(chatID, topicID, proj); err != nil {
 				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Failed to map topic: " + err.Error()})
 				return
 			}
@@ -144,7 +150,7 @@ func HandleUpdate(ctx context.Context, b Bot, upd *models.Update) {
 				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Must be in a topic thread."})
 				return
 			}
-			if err := storage.UnmapTopic(chatID, topicID); err != nil {
+			if err := unmapTopic(chatID, topicID); err != nil {
 				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Failed to unmap: " + err.Error()})
 				return
 			}
