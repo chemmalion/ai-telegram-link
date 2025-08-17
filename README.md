@@ -1,5 +1,7 @@
 # Telegram–ChatGPT Bot in Go
 
+[![Tests](https://github.com/OWNER/ai-telegram-link/actions/workflows/test.yml/badge.svg)](https://github.com/OWNER/ai-telegram-link/actions/workflows/test.yml)
+
 This tool is implemented using ChatGPT.
 
 ## Prerequisites
@@ -169,3 +171,25 @@ docker compose up -d
 ```
 
 The Bolt database will be stored under `data/` on the host.
+
+## Testing
+
+Run the unit tests locally:
+
+```bash
+go test ./...
+```
+
+Tests also run automatically via GitHub Actions on every push, pull request, and tag. The badge at the top of this README links to the latest results.
+
+## Releasing
+
+1. Ensure tests pass locally and in CI.
+2. Create and push an annotated tag:
+
+   ```bash
+   git tag -a v0.1.0 -m "Release v0.1.0"
+   git push origin v0.1.0
+   ```
+
+3. Draft a GitHub release for the tag. The test status for the tagged release will be visible on the release page.
