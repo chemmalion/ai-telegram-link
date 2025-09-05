@@ -64,6 +64,29 @@ func (f *fakeBot) EditMessageText(ctx context.Context, params *tg.EditMessageTex
 	return &models.Message{ID: params.MessageID}, nil
 }
 
+func cmdUpdate(text string) *models.Update {
+	parts := strings.SplitN(text, " ", 2)
+	cmdLen := len(parts[0])
+	return &models.Update{Message: &models.Message{
+		Text: text,
+		Entities: []models.MessageEntity{{
+			Type:   models.MessageEntityTypeBotCommand,
+			Offset: 0,
+			Length: cmdLen,
+		}},
+		Chat: models.Chat{ID: 1},
+		From: &models.User{ID: 1},
+	}}
+}
+
+func initStore(t *testing.T) {
+	dir := t.TempDir()
+	if err := storage.Init(filepath.Join(dir, "test.db")); err != nil {
+		t.Fatalf("storage init: %v", err)
+	}
+	t.Cleanup(func() { storage.Close() })
+}
+
 func TestHandleUpdate_IgnoresCallback(t *testing.T) {
 	b := &fakeBot{}
 	upd := &models.Update{CallbackQuery: &models.CallbackQuery{}, Message: &models.Message{Text: "hi"}}
@@ -314,4 +337,542 @@ func TestHandleUpdateUnsetTopic(t *testing.T) {
 			t.Fatalf("unexpected messages: %v", b.sent)
 		}
 	})
+}
+
+func TestHandleUpdateSetModel(t *testing.T) {
+	logging.Init()
+	t.Run("usage", func(t *testing.T) {
+		b := &fakeBot{}
+		upd := cmdUpdate("/setmodel")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Usage: /setmodel <projectName>" {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("project not found", func(t *testing.T) {
+		initStore(t)
+		b := &fakeBot{}
+		upd := cmdUpdate("/setmodel demo")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Project not found." {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		initStore(t)
+		if err := storage.SaveProject("demo"); err != nil {
+			t.Fatalf("save project: %v", err)
+		}
+		pendingModel = map[int64]string{}
+		b := &fakeBot{}
+		upd := cmdUpdate("/setmodel demo")
+		HandleUpdate(context.Background(), b, upd)
+		if pendingModel[1] != "demo" {
+			t.Fatalf("pendingModel not set: %v", pendingModel)
+		}
+		if len(b.sent) != 1 || b.sent[0] != "Enter model name" {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+}
+
+func TestHandleUpdateSetRule(t *testing.T) {
+	logging.Init()
+	t.Run("usage", func(t *testing.T) {
+		b := &fakeBot{}
+		upd := cmdUpdate("/setrule")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Usage: /setrule <projectName>" {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("project not found", func(t *testing.T) {
+		initStore(t)
+		b := &fakeBot{}
+		upd := cmdUpdate("/setrule demo")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Project not found." {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		initStore(t)
+		if err := storage.SaveProject("demo"); err != nil {
+			t.Fatalf("save project: %v", err)
+		}
+		pendingRule = map[int64]string{}
+		b := &fakeBot{}
+		upd := cmdUpdate("/setrule demo")
+		HandleUpdate(context.Background(), b, upd)
+		if pendingRule[1] != "demo" {
+			t.Fatalf("pendingRule not set: %v", pendingRule)
+		}
+		if len(b.sent) != 1 || b.sent[0] != "Enter your custom instruction" {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+}
+
+func TestHandleUpdateShowRule(t *testing.T) {
+	logging.Init()
+	t.Run("usage", func(t *testing.T) {
+		b := &fakeBot{}
+		upd := cmdUpdate("/showrule")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Usage: /showrule <projectName>" {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("no rule", func(t *testing.T) {
+		initStore(t)
+		if err := storage.SaveProject("demo"); err != nil {
+			t.Fatalf("save project: %v", err)
+		}
+		b := &fakeBot{}
+		upd := cmdUpdate("/showrule demo")
+		HandleUpdate(context.Background(), b, upd)
+		want := "No instruction set for project 'demo'."
+		if len(b.sent) != 1 || b.sent[0] != want {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("rule present", func(t *testing.T) {
+		initStore(t)
+		if err := storage.SaveProject("demo"); err != nil {
+			t.Fatalf("save project: %v", err)
+		}
+		if err := storage.SaveProjectInstruction("demo", "be nice"); err != nil {
+			t.Fatalf("save rule: %v", err)
+		}
+		b := &fakeBot{}
+		upd := cmdUpdate("/showrule demo")
+		HandleUpdate(context.Background(), b, upd)
+		want := "Instruction for project 'demo':\nbe nice"
+		if len(b.sent) != 1 || b.sent[0] != want {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+}
+
+func TestHandleUpdateWebSearch(t *testing.T) {
+	logging.Init()
+	t.Run("usage", func(t *testing.T) {
+		b := &fakeBot{}
+		upd := cmdUpdate("/websearch")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Usage: /websearch <projectName>" {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("project not found", func(t *testing.T) {
+		initStore(t)
+		b := &fakeBot{}
+		upd := cmdUpdate("/websearch demo")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Project not found." {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		initStore(t)
+		if err := storage.SaveProject("demo"); err != nil {
+			t.Fatalf("save project: %v", err)
+		}
+		b := &fakeBot{}
+		upd := cmdUpdate("/websearch demo")
+		HandleUpdate(context.Background(), b, upd)
+		want := "Web search for project 'demo' is off."
+		if len(b.sent) != 1 || b.sent[0] != want {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+}
+
+func TestHandleUpdateSetWebSearch(t *testing.T) {
+	logging.Init()
+	t.Run("usage", func(t *testing.T) {
+		b := &fakeBot{}
+		upd := cmdUpdate("/setwebsearch")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Usage: /setwebsearch <projectName>" {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("project not found", func(t *testing.T) {
+		initStore(t)
+		b := &fakeBot{}
+		upd := cmdUpdate("/setwebsearch demo")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Project not found." {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		initStore(t)
+		if err := storage.SaveProject("demo"); err != nil {
+			t.Fatalf("save project: %v", err)
+		}
+		pendingWebSearch = map[int64]string{}
+		b := &fakeBot{}
+		upd := cmdUpdate("/setwebsearch demo")
+		HandleUpdate(context.Background(), b, upd)
+		if pendingWebSearch[1] != "demo" {
+			t.Fatalf("pendingWebSearch not set: %v", pendingWebSearch)
+		}
+		want := "Enter web search setting (high, medium, low, off)."
+		if len(b.sent) != 1 || b.sent[0] != want {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+}
+
+func TestHandleUpdateReasoning(t *testing.T) {
+	logging.Init()
+	t.Run("usage", func(t *testing.T) {
+		b := &fakeBot{}
+		upd := cmdUpdate("/reasoning")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Usage: /reasoning <projectName>" {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("project not found", func(t *testing.T) {
+		initStore(t)
+		b := &fakeBot{}
+		upd := cmdUpdate("/reasoning demo")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Project not found." {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		initStore(t)
+		if err := storage.SaveProject("demo"); err != nil {
+			t.Fatalf("save project: %v", err)
+		}
+		b := &fakeBot{}
+		upd := cmdUpdate("/reasoning demo")
+		HandleUpdate(context.Background(), b, upd)
+		want := "Reasoning effort for project 'demo' is medium."
+		if len(b.sent) != 1 || b.sent[0] != want {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+}
+
+func TestHandleUpdateSetReasoning(t *testing.T) {
+	logging.Init()
+	t.Run("usage", func(t *testing.T) {
+		b := &fakeBot{}
+		upd := cmdUpdate("/setreasoning")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Usage: /setreasoning <projectName>" {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("project not found", func(t *testing.T) {
+		initStore(t)
+		b := &fakeBot{}
+		upd := cmdUpdate("/setreasoning demo")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Project not found." {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		initStore(t)
+		if err := storage.SaveProject("demo"); err != nil {
+			t.Fatalf("save project: %v", err)
+		}
+		pendingReasoning = map[int64]string{}
+		b := &fakeBot{}
+		upd := cmdUpdate("/setreasoning demo")
+		HandleUpdate(context.Background(), b, upd)
+		if pendingReasoning[1] != "demo" {
+			t.Fatalf("pendingReasoning not set: %v", pendingReasoning)
+		}
+		want := "Enter reasoning effort (minimal, low, medium, high)."
+		if len(b.sent) != 1 || b.sent[0] != want {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+}
+
+func TestHandleUpdateTranscribe(t *testing.T) {
+	logging.Init()
+	t.Run("usage", func(t *testing.T) {
+		b := &fakeBot{}
+		upd := cmdUpdate("/transcribe")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Usage: /transcribe <projectName>" {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("project not found", func(t *testing.T) {
+		initStore(t)
+		b := &fakeBot{}
+		upd := cmdUpdate("/transcribe demo")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Project not found." {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		initStore(t)
+		if err := storage.SaveProject("demo"); err != nil {
+			t.Fatalf("save project: %v", err)
+		}
+		b := &fakeBot{}
+		upd := cmdUpdate("/transcribe demo")
+		HandleUpdate(context.Background(), b, upd)
+		want := "Audio transcription for project 'demo' is off."
+		if len(b.sent) != 1 || b.sent[0] != want {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+}
+
+func TestHandleUpdateSetTranscribe(t *testing.T) {
+	logging.Init()
+	t.Run("usage", func(t *testing.T) {
+		b := &fakeBot{}
+		upd := cmdUpdate("/settranscribe")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Usage: /settranscribe <projectName>" {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("project not found", func(t *testing.T) {
+		initStore(t)
+		b := &fakeBot{}
+		upd := cmdUpdate("/settranscribe demo")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Project not found." {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		initStore(t)
+		if err := storage.SaveProject("demo"); err != nil {
+			t.Fatalf("save project: %v", err)
+		}
+		pendingTranscribe = map[int64]string{}
+		b := &fakeBot{}
+		upd := cmdUpdate("/settranscribe demo")
+		HandleUpdate(context.Background(), b, upd)
+		if pendingTranscribe[1] != "demo" {
+			t.Fatalf("pendingTranscribe not set: %v", pendingTranscribe)
+		}
+		want := "Enable audio transcription? (on, off)"
+		if len(b.sent) != 1 || b.sent[0] != want {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+}
+
+func TestHandleUpdateHistory(t *testing.T) {
+	logging.Init()
+	t.Run("usage", func(t *testing.T) {
+		b := &fakeBot{}
+		upd := cmdUpdate("/history")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Usage: /history <projectName>" {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("project not found", func(t *testing.T) {
+		initStore(t)
+		b := &fakeBot{}
+		upd := cmdUpdate("/history demo")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Project not found." {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		initStore(t)
+		if err := storage.SaveProject("demo"); err != nil {
+			t.Fatalf("save project: %v", err)
+		}
+		if err := storage.SaveHistoryLimit("demo", 5); err != nil {
+			t.Fatalf("save limit: %v", err)
+		}
+		storage.AddHistoryMessage("demo", storage.HistoryMessage{When: 1, Content: "hi"})
+		storage.AddHistoryMessage("demo", storage.HistoryMessage{When: 2, Content: "there"})
+		b := &fakeBot{}
+		upd := cmdUpdate("/history demo")
+		HandleUpdate(context.Background(), b, upd)
+		want := "For project 'demo' history limit is 5 and there are 2 stored messages."
+		if len(b.sent) != 1 || b.sent[0] != want {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+}
+
+func TestHandleUpdateHistoryMessages(t *testing.T) {
+	logging.Init()
+	t.Run("usage", func(t *testing.T) {
+		b := &fakeBot{}
+		upd := cmdUpdate("/historymessages")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Usage: /historymessages <projectName>" {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("project not found", func(t *testing.T) {
+		initStore(t)
+		b := &fakeBot{}
+		upd := cmdUpdate("/historymessages demo")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Project not found." {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("no messages", func(t *testing.T) {
+		initStore(t)
+		if err := storage.SaveProject("demo"); err != nil {
+			t.Fatalf("save project: %v", err)
+		}
+		b := &fakeBot{}
+		upd := cmdUpdate("/historymessages demo")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "No stored messages." {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("some messages", func(t *testing.T) {
+		initStore(t)
+		if err := storage.SaveProject("demo"); err != nil {
+			t.Fatalf("save project: %v", err)
+		}
+		storage.AddHistoryMessage("demo", storage.HistoryMessage{When: 0, WhoName: "Alice", Content: "hello"})
+		storage.AddHistoryMessage("demo", storage.HistoryMessage{When: 1, WhoName: "Bob", Content: "world"})
+		b := &fakeBot{}
+		upd := cmdUpdate("/historymessages demo")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || !strings.Contains(b.sent[0], "Alice") || !strings.Contains(b.sent[0], "Bob") {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+}
+
+func TestHandleUpdateSetHistoryLimit(t *testing.T) {
+	logging.Init()
+	t.Run("usage", func(t *testing.T) {
+		b := &fakeBot{}
+		upd := cmdUpdate("/sethistorylimit")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Usage: /sethistorylimit <projectName>" {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("project not found", func(t *testing.T) {
+		initStore(t)
+		b := &fakeBot{}
+		upd := cmdUpdate("/sethistorylimit demo")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Project not found." {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		initStore(t)
+		if err := storage.SaveProject("demo"); err != nil {
+			t.Fatalf("save project: %v", err)
+		}
+		pendingHistLimit = map[int64]string{}
+		b := &fakeBot{}
+		upd := cmdUpdate("/sethistorylimit demo")
+		HandleUpdate(context.Background(), b, upd)
+		if pendingHistLimit[1] != "demo" {
+			t.Fatalf("pendingHistLimit not set: %v", pendingHistLimit)
+		}
+		want := "Enter new history limit (0 to disable)."
+		if len(b.sent) != 1 || b.sent[0] != want {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+}
+
+func TestHandleUpdateClearHistory(t *testing.T) {
+	logging.Init()
+	t.Run("usage", func(t *testing.T) {
+		b := &fakeBot{}
+		upd := cmdUpdate("/clearhistory")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Usage: /clearhistory <projectName>" {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("project not found", func(t *testing.T) {
+		initStore(t)
+		b := &fakeBot{}
+		upd := cmdUpdate("/clearhistory demo")
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || b.sent[0] != "Project not found." {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		initStore(t)
+		if err := storage.SaveProject("demo"); err != nil {
+			t.Fatalf("save project: %v", err)
+		}
+		storage.AddHistoryMessage("demo", storage.HistoryMessage{When: 1, Content: "hi"})
+		storage.AddHistoryMessage("demo", storage.HistoryMessage{When: 2, Content: "there"})
+		pendingClearHist = map[int64]string{}
+		b := &fakeBot{}
+		upd := cmdUpdate("/clearhistory demo")
+		HandleUpdate(context.Background(), b, upd)
+		if pendingClearHist[1] != "demo" {
+			t.Fatalf("pendingClearHist not set: %v", pendingClearHist)
+		}
+		if len(b.sent) != 1 || !strings.Contains(b.sent[0], "The 2 messages will be removed") {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+}
+
+func TestHandleUpdateListProjects(t *testing.T) {
+	logging.Init()
+	initStore(t)
+	if err := storage.SaveProject("a"); err != nil {
+		t.Fatalf("save project: %v", err)
+	}
+	if err := storage.SaveProject("b"); err != nil {
+		t.Fatalf("save project: %v", err)
+	}
+	b := &fakeBot{}
+	upd := cmdUpdate("/listprojects")
+	HandleUpdate(context.Background(), b, upd)
+	if len(b.sent) != 1 || b.sent[0] != "Projects: a, b" {
+		t.Fatalf("unexpected messages: %v", b.sent)
+	}
 }
