@@ -10,6 +10,7 @@ import (
 
 	tg "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	openai "github.com/openai/openai-go/v2"
 
 	"telegram-chatgpt-bot/internal/logging"
 	"telegram-chatgpt-bot/internal/storage"
@@ -44,6 +45,57 @@ func TestParseCommand(t *testing.T) {
 	cmd, args, ok := parseCommand(msg)
 	if !ok || cmd != "newproject" || args != "proj" {
 		t.Fatalf("parseCommand = %q %q %v", cmd, args, ok)
+	}
+}
+
+func TestParseCommand_OffsetNotZero(t *testing.T) {
+	msg := &models.Message{
+		Text: "/cmd",
+		Entities: []models.MessageEntity{{
+			Type:   models.MessageEntityTypeBotCommand,
+			Offset: 1,
+			Length: len("/cmd"),
+		}},
+	}
+	_, _, ok := parseCommand(msg)
+	if ok {
+		t.Fatal("parseCommand should fail when command not at offset 0")
+	}
+}
+
+func TestSplitMessage_EmptyAndRunes(t *testing.T) {
+	if parts := splitMessage("", 10); parts != nil {
+		t.Fatalf("expected nil for empty input, got %v", parts)
+	}
+	parts := splitMessage("αβγ", 2)
+	expected := []string{"αβ", "γ"}
+	if !reflect.DeepEqual(parts, expected) {
+		t.Fatalf("rune split got %v want %v", parts, expected)
+	}
+}
+
+func TestChatName_Truncate(t *testing.T) {
+	long := strings.Repeat("a", 70)
+	got := chatName(long)
+	if len(got) != 64 {
+		t.Fatalf("expected 64 chars, got %d", len(got))
+	}
+}
+
+func TestReasoningEffortToConst(t *testing.T) {
+	cases := []struct {
+		in   string
+		want openai.ReasoningEffort
+	}{
+		{"minimal", openai.ReasoningEffortMinimal},
+		{"low", openai.ReasoningEffortLow},
+		{"high", openai.ReasoningEffortHigh},
+		{"other", openai.ReasoningEffortMedium},
+	}
+	for _, tc := range cases {
+		if got := reasoningEffortToConst(tc.in); got != tc.want {
+			t.Fatalf("reasoningEffortToConst(%q) = %v want %v", tc.in, got, tc.want)
+		}
 	}
 }
 

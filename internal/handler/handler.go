@@ -73,6 +73,7 @@ var (
 		return tResp.Text, nil
 	}
 	httpGetFunc = http.Get
+	newTicker   = time.NewTicker
 )
 
 // Init parses the allowed user ids from the environment.
@@ -695,7 +696,7 @@ func HandleUpdate(ctx context.Context, b Bot, upd *models.Update) {
 		resultCh <- gptResult{reply: reply}
 	}()
 
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := newTicker(10 * time.Second)
 	start := time.Now()
 	var res gptResult
 	for {
