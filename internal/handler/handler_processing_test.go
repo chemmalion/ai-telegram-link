@@ -2,12 +2,14 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	tg "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -21,6 +23,7 @@ import (
 // testBot allows customizing bot behaviour for tests.
 type testBot struct {
 	sent     []string
+	edits    []tg.EditMessageTextParams
 	getFile  func(ctx context.Context, params *tg.GetFileParams) (*models.File, error)
 	fileLink func(file *models.File) string
 	edit     func(ctx context.Context, params *tg.EditMessageTextParams) (*models.Message, error)
@@ -50,6 +53,7 @@ func (b *testBot) FileDownloadLink(file *models.File) string {
 }
 
 func (b *testBot) EditMessageText(ctx context.Context, params *tg.EditMessageTextParams) (*models.Message, error) {
+	b.edits = append(b.edits, *params)
 	if b.edit != nil {
 		return b.edit(ctx, params)
 	}
@@ -448,5 +452,245 @@ func TestHandleUpdate_HistoryTrim(t *testing.T) {
 	}
 	if hist[0].Content == "first" {
 		t.Fatalf("oldest message was not trimmed: %v", hist)
+	}
+}
+
+func TestChatGPTRequest_ProgressTickerSuccess(t *testing.T) {
+	logging.Init()
+	initStore2(t)
+	chatGPTKey = "x"
+	if err := storage.SaveProject("demo"); err != nil {
+		t.Fatalf("save project: %v", err)
+	}
+	if err := storage.MapTopic(1, 0, "demo"); err != nil {
+		t.Fatalf("map topic: %v", err)
+	}
+
+	origNew := newOpenAIClient
+	origResp := openAIResponses
+	origTicker := newTicker
+	newOpenAIClient = func() *openai.Client { return &openai.Client{} }
+	openAIResponses = func(client *openai.Client, params responses.ResponseNewParams) (string, error) {
+		time.Sleep(5 * time.Millisecond)
+		return "final reply", nil
+	}
+	newTicker = func(d time.Duration) *time.Ticker { return time.NewTicker(1 * time.Millisecond) }
+	defer func() { newOpenAIClient = origNew; openAIResponses = origResp; newTicker = origTicker }()
+
+	upd := &models.Update{Message: &models.Message{ID: 10, Text: "hi", Chat: models.Chat{ID: 1}, From: &models.User{ID: 1}}}
+	b := &testBot{}
+	HandleUpdate(context.Background(), b, upd)
+
+	if len(b.sent) == 0 || b.sent[0] != "Sending to ChatGPT..." {
+		t.Fatalf("progress message not sent: %v", b.sent)
+	}
+	if len(b.edits) < 2 {
+		t.Fatalf("expected at least 2 edits, got %d", len(b.edits))
+	}
+	if !strings.HasPrefix(b.edits[0].Text, "Waiting") {
+		t.Fatalf("first edit = %q, want waiting message", b.edits[0].Text)
+	}
+	if got := b.edits[len(b.edits)-1].Text; got != "final reply" {
+		t.Fatalf("final edit = %q, want %q", got, "final reply")
+	}
+	wantID := upd.Message.ID + 1
+	for i, e := range b.edits {
+		if e.MessageID != wantID {
+			t.Fatalf("edit %d used id %d want %d", i, e.MessageID, wantID)
+		}
+	}
+}
+
+func TestChatGPTRequest_ErrorHandling(t *testing.T) {
+	logging.Init()
+	initStore2(t)
+	chatGPTKey = "x"
+	if err := storage.SaveProject("demo"); err != nil {
+		t.Fatalf("save project: %v", err)
+	}
+	if err := storage.MapTopic(1, 0, "demo"); err != nil {
+		t.Fatalf("map topic: %v", err)
+	}
+	if err := storage.SaveHistoryLimit("demo", 5); err != nil {
+		t.Fatalf("save history limit: %v", err)
+	}
+
+	origNew := newOpenAIClient
+	origResp := openAIResponses
+	origTicker := newTicker
+	newOpenAIClient = func() *openai.Client { return &openai.Client{} }
+	openAIResponses = func(client *openai.Client, params responses.ResponseNewParams) (string, error) {
+		return "", fmt.Errorf("boom")
+	}
+	newTicker = func(d time.Duration) *time.Ticker { return time.NewTicker(time.Hour) }
+	defer func() { newOpenAIClient = origNew; openAIResponses = origResp; newTicker = origTicker }()
+
+	upd := &models.Update{Message: &models.Message{ID: 5, Text: "hi", Chat: models.Chat{ID: 1}, From: &models.User{ID: 1}}}
+	b := &testBot{}
+	HandleUpdate(context.Background(), b, upd)
+
+	if len(b.sent) != 1 || b.sent[0] != "Sending to ChatGPT..." {
+		t.Fatalf("sent messages: %v", b.sent)
+	}
+	if len(b.edits) != 1 || b.edits[0].Text != "OpenAI error: boom" {
+		t.Fatalf("edits: %v", b.edits)
+	}
+	hist, err := storage.LoadProjectHistory("demo")
+	if err != nil {
+		t.Fatalf("load history: %v", err)
+	}
+	if len(hist) != 2 || hist[1].Content != "OpenAI error: boom" {
+		t.Fatalf("history: %v", hist)
+	}
+}
+
+func TestChatGPTRequest_WebSearchTool(t *testing.T) {
+	logging.Init()
+	initStore2(t)
+	chatGPTKey = "x"
+	if err := storage.SaveProject("demo"); err != nil {
+		t.Fatalf("save project: %v", err)
+	}
+	if err := storage.MapTopic(1, 0, "demo"); err != nil {
+		t.Fatalf("map topic: %v", err)
+	}
+
+	cases := []struct {
+		setting  string
+		wantTool bool
+		size     responses.WebSearchToolSearchContextSize
+	}{
+		{"off", false, responses.WebSearchToolSearchContextSizeHigh},
+		{"low", true, responses.WebSearchToolSearchContextSizeLow},
+		{"medium", true, responses.WebSearchToolSearchContextSizeMedium},
+		{"high", true, responses.WebSearchToolSearchContextSizeHigh},
+		{"other", true, responses.WebSearchToolSearchContextSizeHigh},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.setting, func(t *testing.T) {
+			if err := storage.SaveProjectWebSearch("demo", tc.setting); err != nil {
+				t.Fatalf("save web search: %v", err)
+			}
+			origNew := newOpenAIClient
+			origResp := openAIResponses
+			newOpenAIClient = func() *openai.Client { return &openai.Client{} }
+			var paramsCap responses.ResponseNewParams
+			openAIResponses = func(client *openai.Client, params responses.ResponseNewParams) (string, error) {
+				paramsCap = params
+				return "ok", nil
+			}
+			defer func() { newOpenAIClient = origNew; openAIResponses = origResp }()
+
+			upd := &models.Update{Message: &models.Message{ID: 1, Text: "hi", Chat: models.Chat{ID: 1}, From: &models.User{ID: 1}}}
+			HandleUpdate(context.Background(), &testBot{}, upd)
+			if tc.wantTool {
+				if len(paramsCap.Tools) != 1 {
+					t.Fatalf("expected one tool, got %v", paramsCap.Tools)
+				}
+				tool := paramsCap.Tools[0].OfWebSearchPreview
+				if tool == nil || tool.SearchContextSize != tc.size {
+					t.Fatalf("tool size = %v, want %v", tool, tc.size)
+				}
+			} else if len(paramsCap.Tools) != 0 {
+				t.Fatalf("expected no tools, got %v", paramsCap.Tools)
+			}
+		})
+	}
+}
+
+func TestChatGPTRequest_ReasoningEffort(t *testing.T) {
+	logging.Init()
+	initStore2(t)
+	chatGPTKey = "x"
+	if err := storage.SaveProject("demo"); err != nil {
+		t.Fatalf("save project: %v", err)
+	}
+	if err := storage.MapTopic(1, 0, "demo"); err != nil {
+		t.Fatalf("map topic: %v", err)
+	}
+
+	cases := []struct {
+		effort string
+		want   openai.ReasoningEffort
+	}{
+		{"minimal", openai.ReasoningEffortMinimal},
+		{"low", openai.ReasoningEffortLow},
+		{"high", openai.ReasoningEffortHigh},
+		{"", openai.ReasoningEffortMedium},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.effort, func(t *testing.T) {
+			if err := storage.SaveProjectReasoning("demo", tc.effort); err != nil {
+				t.Fatalf("save reasoning: %v", err)
+			}
+			origNew := newOpenAIClient
+			origResp := openAIResponses
+			newOpenAIClient = func() *openai.Client { return &openai.Client{} }
+			var paramsCap responses.ResponseNewParams
+			openAIResponses = func(client *openai.Client, params responses.ResponseNewParams) (string, error) {
+				paramsCap = params
+				return "ok", nil
+			}
+			defer func() { newOpenAIClient = origNew; openAIResponses = origResp }()
+
+			upd := &models.Update{Message: &models.Message{ID: 2, Text: "hi", Chat: models.Chat{ID: 1}, From: &models.User{ID: 1}}}
+			HandleUpdate(context.Background(), &testBot{}, upd)
+			if paramsCap.Reasoning.Effort != tc.want {
+				t.Fatalf("effort = %v, want %v", paramsCap.Reasoning.Effort, tc.want)
+			}
+		})
+	}
+}
+
+func TestResponseHandling_LongMessageSplit(t *testing.T) {
+	logging.Init()
+	initStore2(t)
+	chatGPTKey = "x"
+	if err := storage.SaveProject("demo"); err != nil {
+		t.Fatalf("save project: %v", err)
+	}
+	if err := storage.MapTopic(1, 0, "demo"); err != nil {
+		t.Fatalf("map topic: %v", err)
+	}
+	if err := storage.SaveHistoryLimit("demo", 5); err != nil {
+		t.Fatalf("save history: %v", err)
+	}
+
+	longReply := strings.Repeat("a", 9001)
+
+	origNew := newOpenAIClient
+	origResp := openAIResponses
+	origTicker := newTicker
+	newOpenAIClient = func() *openai.Client { return &openai.Client{} }
+	openAIResponses = func(client *openai.Client, params responses.ResponseNewParams) (string, error) {
+		return longReply, nil
+	}
+	newTicker = func(d time.Duration) *time.Ticker { return time.NewTicker(time.Hour) }
+	defer func() { newOpenAIClient = origNew; openAIResponses = origResp; newTicker = origTicker }()
+
+	upd := &models.Update{Message: &models.Message{ID: 3, Text: "hi", Chat: models.Chat{ID: 1}, From: &models.User{ID: 1}}}
+	b := &testBot{}
+	HandleUpdate(context.Background(), b, upd)
+
+	if len(b.sent) != 3 {
+		t.Fatalf("sent = %v", b.sent)
+	}
+	if b.sent[0] != "Sending to ChatGPT..." {
+		t.Fatalf("first sent = %q", b.sent[0])
+	}
+	if len(b.edits) != 1 || b.edits[0].Text != longReply[:4000] {
+		t.Fatalf("edits = %v", b.edits)
+	}
+	if b.sent[1] != longReply[4000:8000] || b.sent[2] != longReply[8000:] {
+		t.Fatalf("chunk send mismatch")
+	}
+	hist, err := storage.LoadProjectHistory("demo")
+	if err != nil {
+		t.Fatalf("load history: %v", err)
+	}
+	if len(hist) != 2 || hist[1].Content != longReply {
+		t.Fatalf("history: %v", hist)
 	}
 }
