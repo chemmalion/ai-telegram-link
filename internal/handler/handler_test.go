@@ -876,3 +876,354 @@ func TestHandleUpdateListProjects(t *testing.T) {
 		t.Fatalf("unexpected messages: %v", b.sent)
 	}
 }
+
+func TestPendingModel(t *testing.T) {
+	logging.Init()
+
+	t.Run("other user ignored", func(t *testing.T) {
+		initStore(t)
+		pendingModel = map[int64]string{1: "demo"}
+		b := &fakeBot{}
+		upd := &models.Update{Message: &models.Message{Text: "gpt", Chat: models.Chat{ID: 1}, From: &models.User{ID: 2}}}
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 0 {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+		if pendingModel[1] != "demo" {
+			t.Fatalf("pendingModel modified: %v", pendingModel)
+		}
+	})
+
+	t.Run("save error", func(t *testing.T) {
+		pendingModel = map[int64]string{1: "demo"}
+		orig := saveProjectModel
+		saveProjectModel = func(name, model string) error { return fmt.Errorf("boom") }
+		defer func() { saveProjectModel = orig }()
+		b := &fakeBot{}
+		upd := &models.Update{Message: &models.Message{Text: "gpt", Chat: models.Chat{ID: 1}, From: &models.User{ID: 1}}}
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || !strings.Contains(b.sent[0], "Save error: boom") {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+		if _, ok := pendingModel[1]; ok {
+			t.Fatalf("pendingModel not cleared: %v", pendingModel)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		pendingModel = map[int64]string{1: "demo"}
+		called := false
+		orig := saveProjectModel
+		saveProjectModel = func(name, model string) error {
+			called = true
+			if name != "demo" || model != "gpt" {
+				t.Fatalf("unexpected args: %s %s", name, model)
+			}
+			return nil
+		}
+		defer func() { saveProjectModel = orig }()
+		b := &fakeBot{}
+		upd := &models.Update{Message: &models.Message{Text: "gpt", Chat: models.Chat{ID: 1}, From: &models.User{ID: 1}}}
+		HandleUpdate(context.Background(), b, upd)
+		if !called {
+			t.Fatal("saveProjectModel not called")
+		}
+		want := "Project 'demo' uses model 'gpt'."
+		if len(b.sent) != 1 || b.sent[0] != want {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+		if _, ok := pendingModel[1]; ok {
+			t.Fatalf("pendingModel not cleared: %v", pendingModel)
+		}
+	})
+}
+
+func TestPendingRule(t *testing.T) {
+	logging.Init()
+
+	t.Run("save error", func(t *testing.T) {
+		pendingRule = map[int64]string{1: "demo"}
+		orig := saveProjectInstruction
+		saveProjectInstruction = func(name, instr string) error { return fmt.Errorf("boom") }
+		defer func() { saveProjectInstruction = orig }()
+		b := &fakeBot{}
+		upd := &models.Update{Message: &models.Message{Text: "be nice", Chat: models.Chat{ID: 1}, From: &models.User{ID: 1}}}
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || !strings.Contains(b.sent[0], "Save error: boom") {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+		if _, ok := pendingRule[1]; ok {
+			t.Fatalf("pendingRule not cleared: %v", pendingRule)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		pendingRule = map[int64]string{1: "demo"}
+		called := false
+		orig := saveProjectInstruction
+		saveProjectInstruction = func(name, instr string) error {
+			called = true
+			if name != "demo" || instr != "be nice" {
+				t.Fatalf("unexpected args: %s %s", name, instr)
+			}
+			return nil
+		}
+		defer func() { saveProjectInstruction = orig }()
+		b := &fakeBot{}
+		upd := &models.Update{Message: &models.Message{Text: "be nice", Chat: models.Chat{ID: 1}, From: &models.User{ID: 1}}}
+		HandleUpdate(context.Background(), b, upd)
+		if !called {
+			t.Fatal("saveProjectInstruction not called")
+		}
+		if len(b.sent) != 1 || b.sent[0] != "Instruction saved." {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+		if _, ok := pendingRule[1]; ok {
+			t.Fatalf("pendingRule not cleared: %v", pendingRule)
+		}
+	})
+}
+
+func TestPendingWebSearch(t *testing.T) {
+	logging.Init()
+
+	t.Run("invalid option", func(t *testing.T) {
+		pendingWebSearch = map[int64]string{1: "demo"}
+		called := false
+		orig := saveProjectWebSearch
+		saveProjectWebSearch = func(name, setting string) error { called = true; return nil }
+		defer func() { saveProjectWebSearch = orig }()
+		b := &fakeBot{}
+		upd := &models.Update{Message: &models.Message{Text: "unknown", Chat: models.Chat{ID: 1}, From: &models.User{ID: 1}}}
+		HandleUpdate(context.Background(), b, upd)
+		if called {
+			t.Fatal("saveProjectWebSearch should not be called")
+		}
+		want := "Please enter one of: high, medium, low, off."
+		if len(b.sent) != 1 || b.sent[0] != want {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("valid option", func(t *testing.T) {
+		pendingWebSearch = map[int64]string{1: "demo"}
+		var gotName, gotSetting string
+		orig := saveProjectWebSearch
+		saveProjectWebSearch = func(name, setting string) error { gotName, gotSetting = name, setting; return nil }
+		defer func() { saveProjectWebSearch = orig }()
+		b := &fakeBot{}
+		upd := &models.Update{Message: &models.Message{Text: "high", Chat: models.Chat{ID: 1}, From: &models.User{ID: 1}}}
+		HandleUpdate(context.Background(), b, upd)
+		if gotName != "demo" || gotSetting != "high" {
+			t.Fatalf("unexpected args: %s %s", gotName, gotSetting)
+		}
+		want := "Web search for project 'demo' set to high."
+		if len(b.sent) != 1 || b.sent[0] != want {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+}
+
+func TestPendingReasoning(t *testing.T) {
+	logging.Init()
+
+	t.Run("invalid option", func(t *testing.T) {
+		pendingReasoning = map[int64]string{1: "demo"}
+		called := false
+		orig := saveProjectReasoning
+		saveProjectReasoning = func(name, effort string) error { called = true; return nil }
+		defer func() { saveProjectReasoning = orig }()
+		b := &fakeBot{}
+		upd := &models.Update{Message: &models.Message{Text: "extreme", Chat: models.Chat{ID: 1}, From: &models.User{ID: 1}}}
+		HandleUpdate(context.Background(), b, upd)
+		if called {
+			t.Fatal("saveProjectReasoning should not be called")
+		}
+		want := "Please enter one of: minimal, low, medium, high."
+		if len(b.sent) != 1 || b.sent[0] != want {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("valid option", func(t *testing.T) {
+		pendingReasoning = map[int64]string{1: "demo"}
+		var gotName, gotEffort string
+		orig := saveProjectReasoning
+		saveProjectReasoning = func(name, effort string) error { gotName, gotEffort = name, effort; return nil }
+		defer func() { saveProjectReasoning = orig }()
+		b := &fakeBot{}
+		upd := &models.Update{Message: &models.Message{Text: "minimal", Chat: models.Chat{ID: 1}, From: &models.User{ID: 1}}}
+		HandleUpdate(context.Background(), b, upd)
+		if gotName != "demo" || gotEffort != "minimal" {
+			t.Fatalf("unexpected args: %s %s", gotName, gotEffort)
+		}
+		want := "Reasoning effort for project 'demo' set to minimal."
+		if len(b.sent) != 1 || b.sent[0] != want {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+}
+
+func TestPendingTranscribe(t *testing.T) {
+	logging.Init()
+
+	t.Run("invalid option", func(t *testing.T) {
+		pendingTranscribe = map[int64]string{1: "demo"}
+		called := false
+		orig := saveProjectTranscribe
+		saveProjectTranscribe = func(name, setting string) error { called = true; return nil }
+		defer func() { saveProjectTranscribe = orig }()
+		b := &fakeBot{}
+		upd := &models.Update{Message: &models.Message{Text: "maybe", Chat: models.Chat{ID: 1}, From: &models.User{ID: 1}}}
+		HandleUpdate(context.Background(), b, upd)
+		if called {
+			t.Fatal("saveProjectTranscribe should not be called")
+		}
+		want := "Please enter one of: on, off."
+		if len(b.sent) != 1 || b.sent[0] != want {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("valid option", func(t *testing.T) {
+		pendingTranscribe = map[int64]string{1: "demo"}
+		var gotName, gotSetting string
+		orig := saveProjectTranscribe
+		saveProjectTranscribe = func(name, setting string) error { gotName, gotSetting = name, setting; return nil }
+		defer func() { saveProjectTranscribe = orig }()
+		b := &fakeBot{}
+		upd := &models.Update{Message: &models.Message{Text: "on", Chat: models.Chat{ID: 1}, From: &models.User{ID: 1}}}
+		HandleUpdate(context.Background(), b, upd)
+		if gotName != "demo" || gotSetting != "on" {
+			t.Fatalf("unexpected args: %s %s", gotName, gotSetting)
+		}
+		want := "Audio transcription for project 'demo' set to on."
+		if len(b.sent) != 1 || b.sent[0] != want {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+}
+
+func TestPendingHistoryLimit(t *testing.T) {
+	logging.Init()
+
+	t.Run("non-numeric", func(t *testing.T) {
+		pendingHistLimit = map[int64]string{1: "demo"}
+		called := false
+		orig := saveHistoryLimit
+		saveHistoryLimit = func(name string, limit int) error { called = true; return nil }
+		defer func() { saveHistoryLimit = orig }()
+		b := &fakeBot{}
+		upd := &models.Update{Message: &models.Message{Text: "abc", Chat: models.Chat{ID: 1}, From: &models.User{ID: 1}}}
+		HandleUpdate(context.Background(), b, upd)
+		if called {
+			t.Fatal("saveHistoryLimit should not be called")
+		}
+		want := "Please enter a non-negative integer."
+		if len(b.sent) != 1 || b.sent[0] != want {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("negative", func(t *testing.T) {
+		pendingHistLimit = map[int64]string{1: "demo"}
+		called := false
+		orig := saveHistoryLimit
+		saveHistoryLimit = func(name string, limit int) error { called = true; return nil }
+		defer func() { saveHistoryLimit = orig }()
+		b := &fakeBot{}
+		upd := &models.Update{Message: &models.Message{Text: "-5", Chat: models.Chat{ID: 1}, From: &models.User{ID: 1}}}
+		HandleUpdate(context.Background(), b, upd)
+		if called {
+			t.Fatal("saveHistoryLimit should not be called")
+		}
+		want := "Please enter a non-negative integer."
+		if len(b.sent) != 1 || b.sent[0] != want {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("save error", func(t *testing.T) {
+		pendingHistLimit = map[int64]string{1: "demo"}
+		orig := saveHistoryLimit
+		saveHistoryLimit = func(name string, limit int) error { return fmt.Errorf("boom") }
+		defer func() { saveHistoryLimit = orig }()
+		b := &fakeBot{}
+		upd := &models.Update{Message: &models.Message{Text: "5", Chat: models.Chat{ID: 1}, From: &models.User{ID: 1}}}
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || !strings.Contains(b.sent[0], "Save error: boom") {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		pendingHistLimit = map[int64]string{1: "demo"}
+		var gotName string
+		var gotLimit int
+		orig := saveHistoryLimit
+		saveHistoryLimit = func(name string, limit int) error { gotName, gotLimit = name, limit; return nil }
+		defer func() { saveHistoryLimit = orig }()
+		b := &fakeBot{}
+		upd := &models.Update{Message: &models.Message{Text: "7", Chat: models.Chat{ID: 1}, From: &models.User{ID: 1}}}
+		HandleUpdate(context.Background(), b, upd)
+		if gotName != "demo" || gotLimit != 7 {
+			t.Fatalf("unexpected args: %s %d", gotName, gotLimit)
+		}
+		want := "History limit for project 'demo' set to 7."
+		if len(b.sent) != 1 || b.sent[0] != want {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+}
+
+func TestPendingClearHistory(t *testing.T) {
+	logging.Init()
+
+	t.Run("cancel", func(t *testing.T) {
+		pendingClearHist = map[int64]string{1: "demo"}
+		called := false
+		orig := clearProjectHistory
+		clearProjectHistory = func(name string) (int, error) { called = true; return 0, nil }
+		defer func() { clearProjectHistory = orig }()
+		b := &fakeBot{}
+		upd := &models.Update{Message: &models.Message{Text: "no", Chat: models.Chat{ID: 1}, From: &models.User{ID: 1}}}
+		HandleUpdate(context.Background(), b, upd)
+		if called {
+			t.Fatal("clearProjectHistory should not be called")
+		}
+		if len(b.sent) != 1 || b.sent[0] != "Cancelled." {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		pendingClearHist = map[int64]string{1: "demo"}
+		orig := clearProjectHistory
+		clearProjectHistory = func(name string) (int, error) { return 0, fmt.Errorf("boom") }
+		defer func() { clearProjectHistory = orig }()
+		b := &fakeBot{}
+		upd := &models.Update{Message: &models.Message{Text: "confirm", Chat: models.Chat{ID: 1}, From: &models.User{ID: 1}}}
+		HandleUpdate(context.Background(), b, upd)
+		if len(b.sent) != 1 || !strings.Contains(b.sent[0], "Clear error: boom") {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		pendingClearHist = map[int64]string{1: "demo"}
+		var gotName string
+		orig := clearProjectHistory
+		clearProjectHistory = func(name string) (int, error) { gotName = name; return 3, nil }
+		defer func() { clearProjectHistory = orig }()
+		b := &fakeBot{}
+		upd := &models.Update{Message: &models.Message{Text: "confirm", Chat: models.Chat{ID: 1}, From: &models.User{ID: 1}}}
+		HandleUpdate(context.Background(), b, upd)
+		if gotName != "demo" {
+			t.Fatalf("unexpected name: %s", gotName)
+		}
+		want := "Cleared 3 messages from project 'demo'."
+		if len(b.sent) != 1 || b.sent[0] != want {
+			t.Fatalf("unexpected messages: %v", b.sent)
+		}
+	})
+}
