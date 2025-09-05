@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -48,6 +49,30 @@ var (
 	saveProjectTranscribe  = storage.SaveProjectTranscribe
 	saveHistoryLimit       = storage.SaveHistoryLimit
 	clearProjectHistory    = storage.ClearProjectHistory
+
+	// wrappers around OpenAI functions for easier testing
+	newOpenAIClient = func() *openai.Client {
+		c := openai.NewClient(option.WithAPIKey(chatGPTKey))
+		return &c
+	}
+	openAIResponses = func(client *openai.Client, params responses.ResponseNewParams) (string, error) {
+		resp, err := client.Responses.New(context.Background(), params)
+		if err != nil {
+			return "", err
+		}
+		return resp.OutputText(), nil
+	}
+	openAITranscribe = func(client *openai.Client, r io.Reader) (string, error) {
+		tResp, err := client.Audio.Transcriptions.New(context.Background(), openai.AudioTranscriptionNewParams{
+			File:  r,
+			Model: openai.AudioModelWhisper1,
+		})
+		if err != nil {
+			return "", err
+		}
+		return tResp.Text, nil
+	}
+	httpGetFunc = http.Get
 )
 
 // Init parses the allowed user ids from the environment.
@@ -508,7 +533,7 @@ func HandleUpdate(ctx context.Context, b Bot, upd *models.Update) {
 	webSearchSetting, _ := storage.LoadProjectWebSearch(proj)
 	reasoningEffort, _ := storage.LoadProjectReasoning(proj)
 	transcribeSetting, _ := storage.LoadProjectTranscribe(proj)
-	client := openai.NewClient(option.WithAPIKey(chatGPTKey))
+	client := newOpenAIClient()
 	if limit > 0 && len(hist) > 0 {
 		for _, h := range hist {
 			if h.Content == "" {
@@ -537,17 +562,14 @@ func HandleUpdate(ctx context.Context, b Bot, upd *models.Update) {
 			log.Error().Err(err).Msg("failed to get audio file")
 		} else {
 			url := b.FileDownloadLink(file)
-			resp, err := http.Get(url)
+			resp, err := httpGetFunc(url)
 			if err == nil {
 				defer resp.Body.Close()
-				tResp, err := client.Audio.Transcriptions.New(context.Background(), openai.AudioTranscriptionNewParams{
-					File:  resp.Body,
-					Model: openai.AudioModelWhisper1,
-				})
+				tText, err := openAITranscribe(client, resp.Body)
 				if err != nil {
 					log.Error().Err(err).Msg("transcription failed")
 				} else {
-					transcribed = tResp.Text
+					transcribed = tText
 				}
 			} else {
 				log.Error().Err(err).Msg("failed to download audio")
@@ -665,12 +687,12 @@ func HandleUpdate(ctx context.Context, b Bot, upd *models.Update) {
 			Tools:     tools,
 			Reasoning: openai.ReasoningParam{Effort: reasoningEffortToConst(reasoningEffort)},
 		}
-		resp, err := client.Responses.New(context.Background(), params)
+		reply, err := openAIResponses(client, params)
 		if err != nil {
 			resultCh <- gptResult{reply: "OpenAI error: " + err.Error(), err: err}
 			return
 		}
-		resultCh <- gptResult{reply: resp.OutputText()}
+		resultCh <- gptResult{reply: reply}
 	}()
 
 	ticker := time.NewTicker(10 * time.Second)
