@@ -22,15 +22,17 @@ import (
 
 // testBot allows customizing bot behaviour for tests.
 type testBot struct {
-	sent     []string
-	edits    []tg.EditMessageTextParams
-	getFile  func(ctx context.Context, params *tg.GetFileParams) (*models.File, error)
-	fileLink func(file *models.File) string
-	edit     func(ctx context.Context, params *tg.EditMessageTextParams) (*models.Message, error)
+	sent       []string
+	sentParams []tg.SendMessageParams
+	edits      []tg.EditMessageTextParams
+	getFile    func(ctx context.Context, params *tg.GetFileParams) (*models.File, error)
+	fileLink   func(file *models.File) string
+	edit       func(ctx context.Context, params *tg.EditMessageTextParams) (*models.Message, error)
 }
 
 func (b *testBot) SendMessage(ctx context.Context, params *tg.SendMessageParams) (*models.Message, error) {
 	b.sent = append(b.sent, params.Text)
+	b.sentParams = append(b.sentParams, *params)
 	id := 1
 	if params.ReplyParameters != nil {
 		id = params.ReplyParameters.MessageID + 1
@@ -685,6 +687,12 @@ func TestResponseHandling_LongMessageSplit(t *testing.T) {
 	}
 	if b.sent[1] != longReply[4000:8000] || b.sent[2] != longReply[8000:] {
 		t.Fatalf("chunk send mismatch")
+	}
+	if b.sentParams[1].ReplyParameters == nil || b.sentParams[1].ReplyParameters.MessageID != b.edits[0].MessageID {
+		t.Fatalf("second chunk reply id = %v", b.sentParams[1].ReplyParameters)
+	}
+	if b.sentParams[2].ReplyParameters == nil || b.sentParams[2].ReplyParameters.MessageID != b.edits[0].MessageID+1 {
+		t.Fatalf("third chunk reply id = %v", b.sentParams[2].ReplyParameters)
 	}
 	hist, err := storage.LoadProjectHistory("demo")
 	if err != nil {
