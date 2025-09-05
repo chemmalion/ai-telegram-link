@@ -746,17 +746,28 @@ done:
 	if len(chunks) == 0 {
 		return
 	}
-	b.EditMessageText(ctx, &tg.EditMessageTextParams{
+	firstMsg, err := b.EditMessageText(ctx, &tg.EditMessageTextParams{
 		ChatID:    chatID,
 		MessageID: progressMsg.ID,
 		Text:      chunks[0],
 	})
+	if err != nil {
+		log.Error().Err(err).Msg("failed to send first chunk")
+		return
+	}
+	lastID := firstMsg.ID
 	for _, chunk := range chunks[1:] {
-		b.SendMessage(ctx, &tg.SendMessageParams{
+		sentMsg, err := b.SendMessage(ctx, &tg.SendMessageParams{
 			ChatID:          chatID,
 			MessageThreadID: topicID,
 			Text:            chunk,
+			ReplyParameters: &models.ReplyParameters{MessageID: lastID},
 		})
+		if err != nil {
+			log.Error().Err(err).Msg("failed to send chunk")
+			return
+		}
+		lastID = sentMsg.ID
 	}
 	if limit > 0 {
 		storage.AddHistoryMessage(proj, storage.HistoryMessage{
