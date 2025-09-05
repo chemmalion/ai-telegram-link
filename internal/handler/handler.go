@@ -37,10 +37,17 @@ var (
 	chatGPTKey        string
 
 	// wrappers around storage functions for easier testing
-	saveProject   = storage.SaveProject
-	projectExists = storage.ProjectExists
-	mapTopic      = storage.MapTopic
-	unmapTopic    = storage.UnmapTopic
+	saveProject            = storage.SaveProject
+	projectExists          = storage.ProjectExists
+	mapTopic               = storage.MapTopic
+	unmapTopic             = storage.UnmapTopic
+	saveProjectModel       = storage.SaveProjectModel
+	saveProjectInstruction = storage.SaveProjectInstruction
+	saveProjectWebSearch   = storage.SaveProjectWebSearch
+	saveProjectReasoning   = storage.SaveProjectReasoning
+	saveProjectTranscribe  = storage.SaveProjectTranscribe
+	saveHistoryLimit       = storage.SaveHistoryLimit
+	clearProjectHistory    = storage.ClearProjectHistory
 )
 
 // Init parses the allowed user ids from the environment.
@@ -373,7 +380,7 @@ func HandleUpdate(ctx context.Context, b Bot, upd *models.Update) {
 	if proj, ok := pendingModel[msg.From.ID]; ok && msg.Text != "" {
 		model := strings.TrimSpace(msg.Text)
 		delete(pendingModel, msg.From.ID)
-		if err := storage.SaveProjectModel(proj, model); err != nil {
+		if err := saveProjectModel(proj, model); err != nil {
 			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Save error: " + err.Error()})
 			return
 		}
@@ -385,7 +392,7 @@ func HandleUpdate(ctx context.Context, b Bot, upd *models.Update) {
 	if proj, ok := pendingRule[msg.From.ID]; ok && msg.Text != "" {
 		instr := strings.TrimSpace(msg.Text)
 		delete(pendingRule, msg.From.ID)
-		if err := storage.SaveProjectInstruction(proj, instr); err != nil {
+		if err := saveProjectInstruction(proj, instr); err != nil {
 			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Save error: " + err.Error()})
 			return
 		}
@@ -399,7 +406,7 @@ func HandleUpdate(ctx context.Context, b Bot, upd *models.Update) {
 		delete(pendingWebSearch, msg.From.ID)
 		switch val {
 		case "high", "medium", "low", "off":
-			if err := storage.SaveProjectWebSearch(proj, val); err != nil {
+			if err := saveProjectWebSearch(proj, val); err != nil {
 				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Save error: " + err.Error()})
 				return
 			}
@@ -416,7 +423,7 @@ func HandleUpdate(ctx context.Context, b Bot, upd *models.Update) {
 		delete(pendingReasoning, msg.From.ID)
 		switch val {
 		case "minimal", "low", "medium", "high":
-			if err := storage.SaveProjectReasoning(proj, val); err != nil {
+			if err := saveProjectReasoning(proj, val); err != nil {
 				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Save error: " + err.Error()})
 				return
 			}
@@ -433,7 +440,7 @@ func HandleUpdate(ctx context.Context, b Bot, upd *models.Update) {
 		delete(pendingTranscribe, msg.From.ID)
 		switch val {
 		case "on", "off":
-			if err := storage.SaveProjectTranscribe(proj, val); err != nil {
+			if err := saveProjectTranscribe(proj, val); err != nil {
 				b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Save error: " + err.Error()})
 				return
 			}
@@ -453,7 +460,7 @@ func HandleUpdate(ctx context.Context, b Bot, upd *models.Update) {
 			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Please enter a non-negative integer."})
 			return
 		}
-		if err := storage.SaveHistoryLimit(proj, limit); err != nil {
+		if err := saveHistoryLimit(proj, limit); err != nil {
 			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Save error: " + err.Error()})
 			return
 		}
@@ -469,7 +476,7 @@ func HandleUpdate(ctx context.Context, b Bot, upd *models.Update) {
 			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Cancelled."})
 			return
 		}
-		removed, err := storage.ClearProjectHistory(proj)
+		removed, err := clearProjectHistory(proj)
 		if err != nil {
 			b.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, MessageThreadID: topicID, Text: "Clear error: " + err.Error()})
 			return
